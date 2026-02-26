@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowState</title>
+  <link rel="stylesheet" href="../styles/global.css" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header with live timer -->
+    <header>
+      <h1>FlowState</h1>
+      <span id="timer-display">00:00:00</span>
+    </header>
+
+    <!-- Active workspace banner -->
+    <div id="active-banner" class="hidden">
+      <span>🟢 <strong id="active-ws-name"></strong></span>
+      <button id="btn-deactivate">Deactivate</button>
+    </div>
+
+    <!-- Status message -->
+    <p id="status" class="hidden"></p>
+
+    <!-- Organize Tabs (Passive Mode) -->
+    <section id="organize-section">
+      <button id="btn-organize">Organize Tabs</button>
+    </section>
+
+    <!-- Workspaces -->
+    <section id="workspace-section">
+      <h3 class="section-title">Workspaces</h3>
+      <div id="workspace-list"></div>
+      <div id="create-ws-row" class="domain-add">
+        <input id="ws-name-input" placeholder="Workspace name…" />
+        <button id="btn-create-workspace">+</button>
+      </div>
+    </section>
+
+    <!-- Workspace Detail Panel -->
+    <section id="workspace-detail" class="hidden">
+
+      <div class="detail-header">
+        <h3 id="ws-detail-name"></h3>
+        <div class="detail-actions">
+          <button id="btn-save-tabs" class="btn-sm">Save Tabs</button>
+          <button id="btn-delete-ws" class="btn-sm btn-danger-sm">Delete</button>
+        </div>
+      </div>
+
+      <!-- Focus Mode -->
+      <div class="detail-group">
+        <label class="detail-label">Focus Mode</label>
+        <div class="mode-toggle">
+          <button id="btn-mode-easy" class="mode-btn mode-btn--active">Easy</button>
+          <button id="btn-mode-strict" class="mode-btn">Strict</button>
+        </div>
+      </div>
+
+      <!-- Blocked Domains -->
+      <div class="detail-group">
+        <label class="detail-label">Blocked Domains</label>
+        <div id="blocked-list" class="domain-list"></div>
+        <div class="domain-add">
+          <input id="blocked-input" placeholder="e.g. twitter.com" />
+          <button id="btn-add-blocked">+</button>
+        </div>
+      </div>
+
+      <!-- Allowed Domains -->
+      <div class="detail-group">
+        <label class="detail-label">Allowed Domains</label>
+        <div id="allowed-list" class="domain-list"></div>
+        <div class="domain-add">
+          <input id="allowed-input" placeholder="e.g. docs.google.com" />
+          <button id="btn-add-allowed">+</button>
+        </div>
+      </div>
+
+      <!-- Saved Tabs -->
+      <div class="detail-group">
+        <label class="detail-label">Saved Tabs: <span id="saved-tabs-count">0</span></label>
+      </div>
+
+      <!-- To-Do List -->
+      <div class="detail-group">
+        <label class="detail-label">Tasks</label>
+        <div id="todo-progress-bar"><div id="todo-progress-fill"></div></div>
+        <span id="todo-progress-text" class="progress-text">0 / 0 (0%)</span>
+        <ul id="todo-list"></ul>
+        <div class="domain-add">
+          <input id="todo-input" placeholder="Add a task…" />
+          <button id="btn-add-todo">+</button>
+        </div>
+      </div>
+
+      <!-- Activate -->
+      <button id="btn-activate" class="btn-activate">Activate Workspace</button>
+
+    </section>
+
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

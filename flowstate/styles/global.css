@@ -1,0 +1,36 @@
+/* Global shared styles */
+
+:root {
+  --bg: #0f0f0f;
+  --surface: #1a1a2e;
+  --primary: #6c63ff;
+  --primary-hover: #5a52d5;
+  --danger: #ff4757;
+  --success: #2ed573;
+  --text: #e0e0e0;
+  --text-muted: #888;
+  --radius: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font-size: 14px;
+  background: var(--primary);
+  color: #fff;
+  transition: background 0.2s;
+}
+
+button:hover { background: var(--primary-hover); }
+
+.hidden { display: none !important; }
