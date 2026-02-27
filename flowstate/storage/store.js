@@ -16,7 +16,9 @@ const DEFAULT_STATE = {
   activeWorkspaceId: null,
   timer: { startTime: null, elapsed: 0, running: false },
   tempUnlockedDomains: [],
-  unlockCountdowns: {}
+  unlockCountdowns: {},
+  hfApiKey: null,
+  aiEnabled: false,
 };
 
 export async function getState() {
@@ -72,4 +74,17 @@ export function createWorkspace(name) {
     savedTabs: [],
     todos: []
   };
+}
+
+export async function saveApiKey(key) {
+  await setState({ hfApiKey: key || null });
+}
+
+export async function getApiKey() {
+  const { hfApiKey } = await getState();
+  return hfApiKey || null;
+}
+
+export async function setAiEnabled(enabled) {
+  await setState({ aiEnabled: !!enabled });
 }

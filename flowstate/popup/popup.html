@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,6 +8,7 @@
   <link rel="stylesheet" href="../styles/global.css" />
   <link rel="stylesheet" href="popup.css" />
 </head>
+
 <body>
   <div id="app">
 
@@ -62,12 +64,18 @@
 
       <!-- Blocked Domains -->
       <div class="detail-group">
-        <label class="detail-label">Blocked Domains</label>
+        <label class="detail-label">
+          Blocked Domains
+          <button id="btn-ai-suggest" class="ai-badge-btn" title="AI: suggest block/allow for current tab">✦ AI
+            Suggest</button>
+        </label>
         <div id="blocked-list" class="domain-list"></div>
         <div class="domain-add">
           <input id="blocked-input" placeholder="e.g. twitter.com" />
           <button id="btn-add-blocked">+</button>
         </div>
+        <!-- AI suggestion result -->
+        <div id="ai-suggest-result" class="hidden"></div>
       </div>
 
       <!-- Allowed Domains -->
@@ -88,7 +96,9 @@
       <!-- To-Do List -->
       <div class="detail-group">
         <label class="detail-label">Tasks</label>
-        <div id="todo-progress-bar"><div id="todo-progress-fill"></div></div>
+        <div id="todo-progress-bar">
+          <div id="todo-progress-fill"></div>
+        </div>
         <span id="todo-progress-text" class="progress-text">0 / 0 (0%)</span>
         <ul id="todo-list"></ul>
         <div class="domain-add">
@@ -102,8 +112,47 @@
 
     </section>
 
+    <!-- ── AI Settings Section ── -->
+    <section id="ai-section">
+      <div class="ai-section-header" id="ai-section-toggle">
+        <span><span class="ai-tag">AI</span> Smart Blocking</span>
+        <span id="ai-toggle-arrow">›</span>
+      </div>
+
+      <div id="ai-section-body" class="hidden">
+        <!-- AI Enable toggle -->
+        <div class="ai-row">
+          <label class="detail-label">AI Smart Block</label>
+          <label class="ai-switch">
+            <input type="checkbox" id="ai-enabled-toggle" />
+            <span class="ai-slider"></span>
+          </label>
+        </div>
+
+        <p class="ai-desc">
+          Uses <strong>facebook/bart-large-mnli</strong> to automatically detect and block distracting sites not on your
+          manual list.
+        </p>
+
+        <!-- API Key -->
+        <div class="detail-group" style="margin-top:8px">
+          <label class="detail-label">HuggingFace API Key</label>
+          <div class="domain-add">
+            <input id="hf-api-key-input" type="password" placeholder="hf_…" autocomplete="off" />
+            <button id="btn-save-key">Save</button>
+          </div>
+          <span id="key-status" class="ai-key-status"></span>
+        </div>
+
+        <!-- Test AI -->
+        <button id="btn-test-ai" class="btn-test-ai">✦ Test AI on Current Tab</button>
+        <div id="ai-test-result" class="hidden"></div>
+      </div>
+    </section>
+
   </div>
 
   <script src="popup.js" type="module"></script>
 </body>
+
 </html>

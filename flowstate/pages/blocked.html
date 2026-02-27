@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <title>Site Blocked — FlowState</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <link rel="stylesheet" href="pages.css" />
 </head>
+
 <body>
   <div class="page-center">
     <div class="page-icon">🚫</div>
@@ -14,14 +16,27 @@
     <p class="page-msg">This site is blocked while your workspace is active.</p>
 
     <div id="unlock-section">
-      <p class="countdown-label">Need access? Wait for the countdown.</p>
-      <div class="countdown-ring">
-        <span id="countdown">15</span>
+      <!-- Step 1: Intent input (AI-powered) -->
+      <div id="intent-section">
+        <p class="countdown-label">Need access? Tell us why.</p>
+        <textarea id="intent-input" placeholder="Why do you need access? (e.g. need to push a fix to the repo)"
+          rows="3"></textarea>
+        <button id="btn-check-intent">✦ Check with AI</button>
+        <p id="intent-status" class="intent-status hidden"></p>
       </div>
-      <button id="btn-unlock" disabled>Unlock Site</button>
+
+      <!-- Step 2: Countdown (shown after AI approves) -->
+      <div id="countdown-section" class="hidden">
+        <p class="countdown-label">Access approved! Unlocking in…</p>
+        <div class="countdown-ring">
+          <span id="countdown">15</span>
+        </div>
+        <button id="btn-unlock" disabled>Unlock Site</button>
+      </div>
     </div>
   </div>
 
   <script src="blocked.js"></script>
 </body>
+
 </html>

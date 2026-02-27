@@ -99,11 +99,84 @@ body {
   font-weight: 600;
   background: var(--surface);
   color: var(--text-muted);
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .btn-continue:hover {
   border-color: var(--danger);
   color: var(--danger);
-  background: rgba(255,71,87,0.08);
+  background: rgba(255, 71, 87, 0.08);
+}
+
+/* ── AI Intent Unlock (Strict Mode) ─────── */
+#intent-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+#intent-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#intent-input:focus {
+  border-color: var(--primary);
+}
+
+#btn-check-intent {
+  padding: 10px 28px;
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--primary), #a78bfa);
+}
+
+#btn-check-intent:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.intent-status {
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+  line-height: 1.5;
+}
+
+.intent-allow {
+  background: rgba(46, 213, 115, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(46, 213, 115, 0.25);
+}
+
+.intent-deny {
+  background: rgba(255, 71, 87, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(255, 71, 87, 0.25);
+}
+
+.intent-warn {
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffd700;
+  border: 1px solid rgba(255, 193, 7, 0.25);
+}
+
+#countdown-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }

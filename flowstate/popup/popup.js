@@ -3,10 +3,12 @@
  *
  * Section 1: Tab Organizer by Category (existing, fully preserved)
  * Section 2: Workspace, Todo, Timer, Focus Mode (new features)
+ * Section 3: AI Settings (facebook/bart-large-mnli via HF Inference API)
  */
 import {
   getState, setState, getWorkspaces, getWorkspace, saveWorkspace,
-  deleteWorkspace, createWorkspace, setActiveWorkspaceId
+  deleteWorkspace, createWorkspace, setActiveWorkspaceId,
+  saveApiKey, getApiKey, setAiEnabled
 } from '../storage/store.js';
 import { formatTime } from '../utils/timer.js';
 
@@ -20,163 +22,163 @@ import { formatTime } from '../utils/timer.js';
 // Add more as needed — takes 5 seconds to extend.
 const CATEGORY_MAP = {
   // Shopping
-  'amazon':       'Shopping',
-  'flipkart':     'Shopping',
-  'myntra':       'Shopping',
-  'ajio':         'Shopping',
-  'meesho':       'Shopping',
-  'snapdeal':     'Shopping',
-  'ebay':         'Shopping',
-  'walmart':      'Shopping',
-  'aliexpress':   'Shopping',
-  'etsy':         'Shopping',
-  'shopify':      'Shopping',
-  'nykaa':        'Shopping',
+  'amazon': 'Shopping',
+  'flipkart': 'Shopping',
+  'myntra': 'Shopping',
+  'ajio': 'Shopping',
+  'meesho': 'Shopping',
+  'snapdeal': 'Shopping',
+  'ebay': 'Shopping',
+  'walmart': 'Shopping',
+  'aliexpress': 'Shopping',
+  'etsy': 'Shopping',
+  'shopify': 'Shopping',
+  'nykaa': 'Shopping',
 
   // Entertainment
-  'youtube':      'Entertainment',
-  'netflix':      'Entertainment',
-  'hotstar':      'Entertainment',
-  'primevideo':   'Entertainment',
-  'disneyplus':   'Entertainment',
-  'disney':       'Entertainment',
-  'jiocinema':    'Entertainment',
-  'sonyliv':      'Entertainment',
-  'zee5':         'Entertainment',
-  'voot':         'Entertainment',
-  'twitch':       'Entertainment',
-  'crunchyroll':  'Entertainment',
-  'hulu':         'Entertainment',
+  'youtube': 'Entertainment',
+  'netflix': 'Entertainment',
+  'hotstar': 'Entertainment',
+  'primevideo': 'Entertainment',
+  'disneyplus': 'Entertainment',
+  'disney': 'Entertainment',
+  'jiocinema': 'Entertainment',
+  'sonyliv': 'Entertainment',
+  'zee5': 'Entertainment',
+  'voot': 'Entertainment',
+  'twitch': 'Entertainment',
+  'crunchyroll': 'Entertainment',
+  'hulu': 'Entertainment',
 
   // Music
-  'spotify':      'Music',
-  'music.youtube':'Music',
-  'gaana':        'Music',
-  'jiosaavn':     'Music',
-  'soundcloud':   'Music',
-  'wynk':         'Music',
+  'spotify': 'Music',
+  'music.youtube': 'Music',
+  'gaana': 'Music',
+  'jiosaavn': 'Music',
+  'soundcloud': 'Music',
+  'wynk': 'Music',
   'apple.com/music': 'Music',
 
   // Social Media
-  'facebook':     'Social',
-  'instagram':    'Social',
-  'twitter':      'Social',
-  'x.com':        'Social',
-  'linkedin':     'Social',
-  'reddit':       'Social',
-  'quora':        'Social',
-  'pinterest':    'Social',
-  'tumblr':       'Social',
-  'snapchat':     'Social',
-  'threads.net':  'Social',
+  'facebook': 'Social',
+  'instagram': 'Social',
+  'twitter': 'Social',
+  'x.com': 'Social',
+  'linkedin': 'Social',
+  'reddit': 'Social',
+  'quora': 'Social',
+  'pinterest': 'Social',
+  'tumblr': 'Social',
+  'snapchat': 'Social',
+  'threads.net': 'Social',
 
   // Messaging
-  'whatsapp':     'Messaging',
-  'telegram':     'Messaging',
-  'discord':      'Messaging',
-  'slack':        'Messaging',
+  'whatsapp': 'Messaging',
+  'telegram': 'Messaging',
+  'discord': 'Messaging',
+  'slack': 'Messaging',
   'teams.microsoft': 'Messaging',
 
   // Dev & Code
-  'github':       'Dev',
-  'gitlab':       'Dev',
-  'stackoverflow':'Dev',
-  'codepen':      'Dev',
-  'replit':       'Dev',
-  'leetcode':     'Dev',
-  'hackerrank':   'Dev',
-  'codeforces':   'Dev',
-  'geeksforgeeks':'Dev',
-  'npmjs':        'Dev',
+  'github': 'Dev',
+  'gitlab': 'Dev',
+  'stackoverflow': 'Dev',
+  'codepen': 'Dev',
+  'replit': 'Dev',
+  'leetcode': 'Dev',
+  'hackerrank': 'Dev',
+  'codeforces': 'Dev',
+  'geeksforgeeks': 'Dev',
+  'npmjs': 'Dev',
 
   // Productivity / Work
-  'docs.google':  'Productivity',
-  'sheets.google':'Productivity',
-  'slides.google':'Productivity',
+  'docs.google': 'Productivity',
+  'sheets.google': 'Productivity',
+  'slides.google': 'Productivity',
   'drive.google': 'Productivity',
-  'notion':       'Productivity',
-  'trello':       'Productivity',
-  'asana':        'Productivity',
-  'figma':        'Productivity',
-  'canva':        'Productivity',
-  'miro':         'Productivity',
+  'notion': 'Productivity',
+  'trello': 'Productivity',
+  'asana': 'Productivity',
+  'figma': 'Productivity',
+  'canva': 'Productivity',
+  'miro': 'Productivity',
 
   // Email
-  'mail.google':  'Email',
-  'outlook':      'Email',
-  'protonmail':   'Email',
-  'yahoo.com/mail':'Email',
+  'mail.google': 'Email',
+  'outlook': 'Email',
+  'protonmail': 'Email',
+  'yahoo.com/mail': 'Email',
 
   // Search / AI
-  'google.com':   'Search',
-  'bing.com':     'Search',
-  'duckduckgo':   'Search',
-  'chatgpt':      'Search',
-  'bard.google':  'Search',
-  'gemini.google':'Search',
-  'perplexity':   'Search',
+  'google.com': 'Search',
+  'bing.com': 'Search',
+  'duckduckgo': 'Search',
+  'chatgpt': 'Search',
+  'bard.google': 'Search',
+  'gemini.google': 'Search',
+  'perplexity': 'Search',
 
   // News
-  'news.google':  'News',
-  'bbc':          'News',
-  'cnn':          'News',
-  'ndtv':         'News',
+  'news.google': 'News',
+  'bbc': 'News',
+  'cnn': 'News',
+  'ndtv': 'News',
   'timesofindia': 'News',
-  'thehindu':     'News',
-  'indianexpress':'News',
-  'hindustantimes':'News',
+  'thehindu': 'News',
+  'indianexpress': 'News',
+  'hindustantimes': 'News',
 
   // Education
-  'coursera':     'Education',
-  'udemy':        'Education',
-  'khanacademy':  'Education',
-  'edx':          'Education',
-  'unacademy':    'Education',
-  'byjus':        'Education',
-  'w3schools':    'Education',
+  'coursera': 'Education',
+  'udemy': 'Education',
+  'khanacademy': 'Education',
+  'edx': 'Education',
+  'unacademy': 'Education',
+  'byjus': 'Education',
+  'w3schools': 'Education',
 
   // Finance / Payments
-  'paytm':        'Finance',
-  'phonepe':      'Finance',
-  'gpay':         'Finance',
-  'razorpay':     'Finance',
-  'zerodha':      'Finance',
-  'groww':        'Finance',
+  'paytm': 'Finance',
+  'phonepe': 'Finance',
+  'gpay': 'Finance',
+  'razorpay': 'Finance',
+  'zerodha': 'Finance',
+  'groww': 'Finance',
   'moneycontrol': 'Finance',
 
   // Travel
-  'makemytrip':   'Travel',
-  'goibibo':      'Travel',
-  'irctc':        'Travel',
-  'booking.com':  'Travel',
-  'airbnb':       'Travel',
-  'tripadvisor':  'Travel',
-  'skyscanner':   'Travel',
+  'makemytrip': 'Travel',
+  'goibibo': 'Travel',
+  'irctc': 'Travel',
+  'booking.com': 'Travel',
+  'airbnb': 'Travel',
+  'tripadvisor': 'Travel',
+  'skyscanner': 'Travel',
 
   // Food
-  'zomato':       'Food',
-  'swiggy':       'Food',
-  'ubereats':     'Food',
-  'dominos':      'Food',
+  'zomato': 'Food',
+  'swiggy': 'Food',
+  'ubereats': 'Food',
+  'dominos': 'Food',
 };
 
 // Assign a fixed color per category so they're always consistent
 const CATEGORY_COLORS = {
-  'Shopping':      'yellow',
+  'Shopping': 'yellow',
   'Entertainment': 'red',
-  'Music':         'pink',
-  'Social':        'blue',
-  'Messaging':     'purple',
-  'Dev':           'cyan',
-  'Productivity':  'green',
-  'Email':         'orange',
-  'Search':        'blue',
-  'News':          'red',
-  'Education':     'green',
-  'Finance':       'yellow',
-  'Travel':        'cyan',
-  'Food':          'orange',
-  'Other':         'grey',
+  'Music': 'pink',
+  'Social': 'blue',
+  'Messaging': 'purple',
+  'Dev': 'cyan',
+  'Productivity': 'green',
+  'Email': 'orange',
+  'Search': 'blue',
+  'News': 'red',
+  'Education': 'green',
+  'Finance': 'yellow',
+  'Travel': 'cyan',
+  'Food': 'orange',
+  'Other': 'grey',
 };
 
 const FALLBACK_COLORS = [
@@ -184,12 +186,12 @@ const FALLBACK_COLORS = [
   'pink', 'purple', 'cyan', 'orange'
 ];
 
-const btn    = document.getElementById('btn-organize');
+const btn = document.getElementById('btn-organize');
 const status = document.getElementById('status');
 
 // ── Main click handler ─────────────────────────────────────────
 btn.addEventListener('click', async () => {
-  btn.disabled    = true;
+  btn.disabled = true;
   btn.textContent = 'Organizing…';
   status.classList.add('hidden');
 
@@ -203,7 +205,7 @@ btn.addEventListener('click', async () => {
   }
 
   setTimeout(() => {
-    btn.disabled    = false;
+    btn.disabled = false;
     btn.textContent = 'Organize Tabs';
   }, 1200);
 });
@@ -260,14 +262,14 @@ async function createTabGroups(categoryMap) {
   let fallbackIdx = 0;
   for (const [category, tabs] of categoryMap) {
     if (tabs.length === 0) continue;
-    const tabIds  = tabs.map(t => t.id);
+    const tabIds = tabs.map(t => t.id);
     const groupId = await chrome.tabs.group({ tabIds });
     // Use fixed category color, or rotate fallback colors for unknown categories
     const color = CATEGORY_COLORS[category]
       || FALLBACK_COLORS[fallbackIdx++ % FALLBACK_COLORS.length];
     await chrome.tabGroups.update(groupId, {
-      title:     category,
-      color:     color,
+      title: category,
+      color: color,
       collapsed: tabs.length > 3
     });
   }
@@ -276,7 +278,7 @@ async function createTabGroups(categoryMap) {
 /** Show status text below the button. */
 function showStatus(text, type) {
   status.textContent = text;
-  status.className   = 'status status--' + type;
+  status.className = 'status status--' + type;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -287,31 +289,31 @@ let selectedWsId = null;
 let timerInterval = null;
 
 // ── DOM Refs (new UI elements) ─────────────────────────────────
-const $timerDisplay     = document.getElementById('timer-display');
-const $activeBanner     = document.getElementById('active-banner');
-const $activeWsName     = document.getElementById('active-ws-name');
-const $btnDeactivate    = document.getElementById('btn-deactivate');
-const $wsList           = document.getElementById('workspace-list');
-const $btnCreateWs      = document.getElementById('btn-create-workspace');
-const $wsDetail         = document.getElementById('workspace-detail');
-const $wsDetailName     = document.getElementById('ws-detail-name');
-const $btnSaveTabs      = document.getElementById('btn-save-tabs');
-const $btnDeleteWs      = document.getElementById('btn-delete-ws');
-const $btnModeEasy      = document.getElementById('btn-mode-easy');
-const $btnModeStrict    = document.getElementById('btn-mode-strict');
-const $blockedList      = document.getElementById('blocked-list');
-const $blockedInput     = document.getElementById('blocked-input');
-const $btnAddBlocked    = document.getElementById('btn-add-blocked');
-const $allowedList      = document.getElementById('allowed-list');
-const $allowedInput     = document.getElementById('allowed-input');
-const $btnAddAllowed    = document.getElementById('btn-add-allowed');
-const $savedTabsCount   = document.getElementById('saved-tabs-count');
-const $todoList         = document.getElementById('todo-list');
-const $todoInput        = document.getElementById('todo-input');
-const $btnAddTodo       = document.getElementById('btn-add-todo');
+const $timerDisplay = document.getElementById('timer-display');
+const $activeBanner = document.getElementById('active-banner');
+const $activeWsName = document.getElementById('active-ws-name');
+const $btnDeactivate = document.getElementById('btn-deactivate');
+const $wsList = document.getElementById('workspace-list');
+const $btnCreateWs = document.getElementById('btn-create-workspace');
+const $wsDetail = document.getElementById('workspace-detail');
+const $wsDetailName = document.getElementById('ws-detail-name');
+const $btnSaveTabs = document.getElementById('btn-save-tabs');
+const $btnDeleteWs = document.getElementById('btn-delete-ws');
+const $btnModeEasy = document.getElementById('btn-mode-easy');
+const $btnModeStrict = document.getElementById('btn-mode-strict');
+const $blockedList = document.getElementById('blocked-list');
+const $blockedInput = document.getElementById('blocked-input');
+const $btnAddBlocked = document.getElementById('btn-add-blocked');
+const $allowedList = document.getElementById('allowed-list');
+const $allowedInput = document.getElementById('allowed-input');
+const $btnAddAllowed = document.getElementById('btn-add-allowed');
+const $savedTabsCount = document.getElementById('saved-tabs-count');
+const $todoList = document.getElementById('todo-list');
+const $todoInput = document.getElementById('todo-input');
+const $btnAddTodo = document.getElementById('btn-add-todo');
 const $todoProgressFill = document.getElementById('todo-progress-fill');
 const $todoProgressText = document.getElementById('todo-progress-text');
-const $btnActivate      = document.getElementById('btn-activate');
+const $btnActivate = document.getElementById('btn-activate');
 
 // ── Init (modules are deferred, so DOM is already ready) ───────
 (async () => {
@@ -339,13 +341,13 @@ async function renderWorkspaces() {
 
   for (const ws of entries) {
     const card = document.createElement('div');
-    const isActive   = ws.id === activeWorkspaceId;
+    const isActive = ws.id === activeWorkspaceId;
     const isSelected = ws.id === selectedWsId;
     card.className = 'ws-card'
       + (isSelected ? ' ws-card--selected' : '')
-      + (isActive   ? ' ws-card--active'   : '');
+      + (isActive ? ' ws-card--active' : '');
 
-    const done  = ws.todos.filter(t => t.completed).length;
+    const done = ws.todos.filter(t => t.completed).length;
     const total = ws.todos.length;
 
     card.innerHTML = `
@@ -512,12 +514,23 @@ function bindNewEvents() {
   const $wsNameInput = document.getElementById('ws-name-input');
   $btnCreateWs.addEventListener('click', async () => {
     const name = $wsNameInput.value.trim();
-    if (!name) { $wsNameInput.focus(); return; }
-    const ws = createWorkspace(name);
-    await saveWorkspace(ws);
-    $wsNameInput.value = '';
-    await renderWorkspaces();
-    await selectWorkspace(ws.id);
+    if (!name) { $wsNameInput.placeholder = 'Enter a name first!'; $wsNameInput.focus(); return; }
+    $btnCreateWs.disabled = true;
+    $btnCreateWs.textContent = '…';
+    try {
+      const ws = createWorkspace(name);
+      await saveWorkspace(ws);
+      $wsNameInput.value = '';
+      $wsNameInput.placeholder = 'Workspace name…';
+      await renderWorkspaces();
+      await selectWorkspace(ws.id);
+    } catch (err) {
+      showStatus('✗ Could not save workspace: ' + err.message, 'err');
+      console.error('[FlowState] createWorkspace error:', err);
+    } finally {
+      $btnCreateWs.disabled = false;
+      $btnCreateWs.textContent = '+';
+    }
   });
   $wsNameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') $btnCreateWs.click();
@@ -526,26 +539,34 @@ function bindNewEvents() {
   // Save current tabs into workspace
   $btnSaveTabs.addEventListener('click', async () => {
     if (!selectedWsId) return;
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const ws = await getWorkspace(selectedWsId);
-    ws.savedTabs = tabs
-      .filter(t => { try { return new URL(t.url).protocol.startsWith('http'); } catch { return false; } })
-      .map(t => ({ url: t.url, title: t.title || '' }));
-    await saveWorkspace(ws);
-    $savedTabsCount.textContent = ws.savedTabs.length;
-    $btnSaveTabs.textContent = 'Saved ✓';
-    setTimeout(() => { $btnSaveTabs.textContent = 'Save Tabs'; }, 1000);
+    try {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const ws = await getWorkspace(selectedWsId);
+      ws.savedTabs = tabs
+        .filter(t => { try { return new URL(t.url).protocol.startsWith('http'); } catch { return false; } })
+        .map(t => ({ url: t.url, title: t.title || '' }));
+      await saveWorkspace(ws);
+      $savedTabsCount.textContent = ws.savedTabs.length;
+      $btnSaveTabs.textContent = 'Saved ✓';
+      setTimeout(() => { $btnSaveTabs.textContent = 'Save Tabs'; }, 1000);
+    } catch (err) {
+      showStatus('✗ ' + err.message, 'err');
+    }
   });
 
   // Delete workspace
   $btnDeleteWs.addEventListener('click', async () => {
     if (!selectedWsId) return;
     if (!confirm('Delete this workspace?')) return;
-    await deleteWorkspace(selectedWsId);
-    selectedWsId = null;
-    $wsDetail.classList.add('hidden');
-    await renderWorkspaces();
-    await syncActiveState();
+    try {
+      await deleteWorkspace(selectedWsId);
+      selectedWsId = null;
+      $wsDetail.classList.add('hidden');
+      await renderWorkspaces();
+      await syncActiveState();
+    } catch (err) {
+      showStatus('✗ ' + err.message, 'err');
+    }
   });
 
   // Focus mode toggles
@@ -595,7 +616,7 @@ function bindNewEvents() {
       await syncActiveState();
       await renderWorkspaces();
       if (selectedWsId) await selectWorkspace(selectedWsId);
-    } catch {}
+    } catch { }
     $btnDeactivate.disabled = false;
     $btnDeactivate.textContent = 'Deactivate';
   });
@@ -646,3 +667,170 @@ function esc(str) {
   d.textContent = str;
   return d.innerHTML;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 3: AI SETTINGS
+// ═══════════════════════════════════════════════════════════════
+
+const $aiSectionToggle = document.getElementById('ai-section-toggle');
+const $aiSectionBody = document.getElementById('ai-section-body');
+const $aiToggleArrow = document.getElementById('ai-toggle-arrow');
+const $aiEnabledToggle = document.getElementById('ai-enabled-toggle');
+const $hfApiKeyInput = document.getElementById('hf-api-key-input');
+const $btnSaveKey = document.getElementById('btn-save-key');
+const $keyStatus = document.getElementById('key-status');
+const $btnTestAi = document.getElementById('btn-test-ai');
+const $aiTestResult = document.getElementById('ai-test-result');
+const $btnAiSuggest = document.getElementById('btn-ai-suggest');
+const $aiSuggestResult = document.getElementById('ai-suggest-result');
+
+// Load AI settings on init
+(async () => {
+  try {
+    const { hfApiKey, aiEnabled } = await getState();
+    if (hfApiKey) {
+      $hfApiKeyInput.value = hfApiKey;
+      $keyStatus.textContent = '✓ Key saved';
+      $keyStatus.className = 'ai-key-status ai-key-ok';
+    }
+    $aiEnabledToggle.checked = !!aiEnabled;
+  } catch { }
+})();
+
+// Collapsible toggle
+$aiSectionToggle.addEventListener('click', () => {
+  const open = !$aiSectionBody.classList.contains('hidden');
+  $aiSectionBody.classList.toggle('hidden', open);
+  $aiToggleArrow.style.transform = open ? '' : 'rotate(90deg)';
+});
+
+// AI enable toggle
+$aiEnabledToggle.addEventListener('change', async () => {
+  await setAiEnabled($aiEnabledToggle.checked);
+});
+
+// Save API key
+$btnSaveKey.addEventListener('click', async () => {
+  const key = $hfApiKeyInput.value.trim();
+  if (!key || !key.startsWith('hf_')) {
+    $keyStatus.textContent = '✗ Key must start with hf_';
+    $keyStatus.className = 'ai-key-status ai-key-err';
+    return;
+  }
+  $btnSaveKey.disabled = true;
+  $btnSaveKey.textContent = 'Saving…';
+  try {
+    await saveApiKey(key);
+    $keyStatus.textContent = '✓ Key saved';
+    $keyStatus.className = 'ai-key-status ai-key-ok';
+  } catch (err) {
+    $keyStatus.textContent = '✗ ' + err.message;
+    $keyStatus.className = 'ai-key-status ai-key-err';
+  } finally {
+    $btnSaveKey.disabled = false;
+    $btnSaveKey.textContent = 'Save';
+  }
+});
+
+// Test AI on current tab
+$btnTestAi.addEventListener('click', async () => {
+  $btnTestAi.disabled = true;
+  $btnTestAi.textContent = '✦ Running…';
+  $aiTestResult.className = 'hidden';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url || tab.url.startsWith('chrome')) {
+      throw new Error('No classifiable tab is active.');
+    }
+    const res = await chrome.runtime.sendMessage({
+      type: 'ai-classify',
+      url: tab.url,
+      title: tab.title || '',
+    });
+
+    if (!res?.success) throw new Error(res?.error || 'AI classification failed');
+
+    const pct = Math.round(res.topScore * 100);
+    const icon = res.topLabel.includes('distraction') || res.topLabel.includes('social')
+      ? '🚫' : res.topLabel.includes('productive') ? '✅' : '🔵';
+    $aiTestResult.innerHTML =
+      `<span class="ai-result-domain">${esc(new URL(tab.url).hostname)}</span>` +
+      `<br><span class="ai-result-label">${icon} ${esc(res.topLabel)}</span>` +
+      `<span class="ai-result-score">${pct}% confident</span>`;
+    $aiTestResult.className = 'ai-test-result-box';
+  } catch (err) {
+    $aiTestResult.textContent = '✗ ' + err.message;
+    $aiTestResult.className = 'ai-test-result-box ai-result-err';
+  } finally {
+    $btnTestAi.disabled = false;
+    $btnTestAi.textContent = '✦ Test AI on Current Tab';
+  }
+});
+
+// AI Suggest: classify current tab and suggest block/allow
+$btnAiSuggest.addEventListener('click', async () => {
+  if (!selectedWsId) return;
+  $btnAiSuggest.disabled = true;
+  $btnAiSuggest.textContent = '✦ Thinking…';
+  $aiSuggestResult.className = 'hidden';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url || tab.url.startsWith('chrome')) {
+      throw new Error('No classifiable tab active.');
+    }
+    const host = new URL(tab.url).hostname.replace('www.', '');
+    const res = await chrome.runtime.sendMessage({
+      type: 'ai-classify',
+      url: tab.url,
+      title: tab.title || '',
+    });
+    if (!res?.success) throw new Error(res?.error || 'AI failed');
+
+    const isDistraction = res.topLabel.includes('distraction') || res.topLabel.includes('social');
+    const pct = Math.round(res.topScore * 100);
+    const suggestion = isDistraction
+      ? `<b>AI says: block <code>${esc(host)}</code></b> — looks like <em>${esc(res.topLabel)}</em> (${pct}% confident).`
+      : `<b>AI says: allow <code>${esc(host)}</code></b> — looks like <em>${esc(res.topLabel)}</em> (${pct}% confident).`;
+
+    $aiSuggestResult.innerHTML =
+      `<span class="ai-suggest-label">${suggestion}</span>` +
+      (isDistraction
+        ? `<button id="btn-do-block" class="ai-suggest-action ai-suggest-block">+ Block ${esc(host)}</button>`
+        : `<button id="btn-do-allow" class="ai-suggest-action ai-suggest-allow">+ Allow ${esc(host)}</button>`);
+    $aiSuggestResult.className = `ai-suggest-box ${isDistraction ? 'ai-suggest-danger' : 'ai-suggest-safe'}`;
+
+    // Wire up the one-click add button
+    const $doBlock = document.getElementById('btn-do-block');
+    const $doAllow = document.getElementById('btn-do-allow');
+    if ($doBlock) {
+      $doBlock.addEventListener('click', async () => {
+        const ws = await getWorkspace(selectedWsId);
+        if (!ws.blockedDomains.includes(host)) {
+          ws.blockedDomains.push(host);
+          await saveWorkspace(ws);
+          await selectWorkspace(selectedWsId);
+        }
+        $aiSuggestResult.className = 'hidden';
+      });
+    }
+    if ($doAllow) {
+      $doAllow.addEventListener('click', async () => {
+        const ws = await getWorkspace(selectedWsId);
+        if (!ws.allowedDomains.includes(host)) {
+          ws.allowedDomains.push(host);
+          await saveWorkspace(ws);
+          await selectWorkspace(selectedWsId);
+        }
+        $aiSuggestResult.className = 'hidden';
+      });
+    }
+  } catch (err) {
+    $aiSuggestResult.textContent = '✗ ' + err.message;
+    $aiSuggestResult.className = 'ai-suggest-box ai-suggest-danger';
+  } finally {
+    $btnAiSuggest.disabled = false;
+    $btnAiSuggest.textContent = '✦ AI Suggest';
+  }
+});
