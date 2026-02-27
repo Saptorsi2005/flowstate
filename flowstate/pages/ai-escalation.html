@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FlowState — Stay Focused</title>
+  <link rel="stylesheet" href="../styles/global.css" />
+  <link rel="stylesheet" href="pages.css" />
+  <style>
+    /* Level-specific styles */
+    .level-1-warning {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(135deg, #ff6b6b, #ff8e53);
+      color: white;
+      padding: 12px 20px;
+      text-align: center;
+      font-weight: 600;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      z-index: 10000;
+      animation: slideDown 0.3s ease;
+    }
+
+    .level-2-overlay {
+      background: rgba(0, 0, 0, 0.95);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .delay-circle {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 6px solid rgba(255, 255, 255, 0.2);
+      border-top-color: var(--primary);
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+
+    .delay-text {
+      font-size: 48px;
+      font-weight: 700;
+      color: var(--primary);
+      text-align: center;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes slideDown {
+      from { transform: translateY(-100%); }
+      to { transform: translateY(0); }
+    }
+
+    .intent-box {
+      max-width: 500px;
+      margin: 20px auto;
+    }
+
+    .intent-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 2px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      resize: vertical;
+      margin-bottom: 16px;
+    }
+
+    .intent-textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <!-- Level 1: Warning Banner -->
+  <div id="level-1" class="hidden">
+    <div class="level-1-warning">
+      ⚠️ AI detected this as potentially distracting. Proceed with caution!
+      <button id="btn-dismiss-l1" style="margin-left: 20px; padding: 4px 12px; background: rgba(255,255,255,0.2); border: none; border-radius: 4px; color: white; cursor: pointer;">Dismiss</button>
+    </div>
+  </div>
+
+  <!-- Level 2: 3-Second Delay -->
+  <div id="level-2" class="page-center level-2-overlay hidden">
+    <div>
+      <div class="page-icon">⏳</div>
+      <h1>Taking a Breath...</h1>
+      <p class="page-msg">This site might be distracting.</p>
+      <div class="delay-circle"></div>
+      <div class="delay-text" id="countdown-l2">3</div>
+      <p style="opacity: 0.7;">Redirecting in <span id="countdown-l2-text">3</span> seconds...</p>
+    </div>
+  </div>
+
+  <!-- Level 3: Intent Confirmation -->
+  <div id="level-3" class="page-center hidden">
+    <div class="intent-box">
+      <div class="page-icon">🤔</div>
+      <h1>Why Do You Need This?</h1>
+      <p class="blocked-url" id="target-url-l3"></p>
+      <p class="page-msg">This site was flagged as distracting. Please explain your reason for visiting:</p>
+      
+      <textarea 
+        id="intent-input-l3" 
+        class="intent-textarea" 
+        placeholder="E.g., 'Need to check work notifications' or 'Looking up a specific tutorial'"></textarea>
+      
+      <div class="button-row">
+        <button id="btn-go-back-l3" class="btn-stay">Go Back</button>
+        <button id="btn-continue-l3" class="btn-continue">Continue Anyway</button>
+      </div>
+      
+      <p style="text-align: center; opacity: 0.6; font-size: 13px; margin-top: 16px;">
+        Next visit will temporarily block this site for 10 minutes
+      </p>
+    </div>
+  </div>
+
+  <script src="ai-escalation.js"></script>
+</body>
+</html>

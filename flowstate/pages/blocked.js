@@ -13,6 +13,7 @@
 var params = new URLSearchParams(window.location.search);
 var url = params.get('url') ? decodeURIComponent(params.get('url')) : null;
 var tabId = params.get('tabId') ? parseInt(params.get('tabId'), 10) : null;
+var blockType = params.get('type') || 'manual'; // 'manual', 'ai', 'ai-temp'
 var DURATION = 15; // seconds
 
 var $blockedUrl = document.getElementById('blocked-url');
@@ -29,8 +30,113 @@ try { domain = new URL(url).hostname; } catch (e) { }
 
 $blockedUrl.textContent = domain || url || 'Unknown site';
 
+// Reload detection temporarily disabled to prevent false positives
+// Extension reload will naturally invalidate pages
+
+// ── Listen for focus mode changes ──────────────────────────────
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== 'local') return;
+  
+  // Handle AI Smart Blocking being disabled
+  if (changes.aiEnabled) {
+    const aiEnabled = changes.aiEnabled.newValue;
+    // If AI was disabled and this is an AI-blocked page, unblock it
+    if (!aiEnabled && (blockType === 'ai' || blockType === 'ai-block')) {
+      console.log('[FlowState] AI Smart Blocking disabled, navigating to original URL');
+      window.location.href = url || 'chrome://newtab';
+      return;
+    }
+  }
+  
+  // Handle focus mode changes
+  if (changes.workspaces) {
+    try {
+      const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
+      if (!data.activeWorkspaceId) return;
+      
+      const ws = data.workspaces?.[data.activeWorkspaceId];
+      if (!ws) return;
+      
+      // If focus mode changed to easy, reload as soft-redirect page (only for manual blocks)
+      if (ws.focusMode === 'easy' && blockType === 'manual') {
+        console.log('[FlowState] Focus mode changed to easy, switching page');
+        const encoded = encodeURIComponent(url);
+        window.location.href = chrome.runtime.getURL(
+          `pages/soft-redirect.html?url=${encoded}&tabId=${tabId}&mode=easy`
+        );
+      }
+    } catch (e) {
+      console.warn('[FlowState] Error checking focus mode change:', e);
+    }
+  }
+});
+
+// ── Handle Temporary AI Block ──────────────────────────────────
+async function handleTempBlock() {
+  // Hide intent unlock section
+  document.getElementById('unlock-section').style.display = 'none';
+  
+  // Update page message
+  var $pageMsg = document.querySelector('.page-msg');
+  $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
+  
+  // Get temp block data
+  var data = await chrome.storage.local.get('aiTempBlocks');
+  var tempBlocks = data.aiTempBlocks || {};
+  var block = tempBlocks[domain];
+  
+  if (!block || block.blockedUntil <= Date.now()) {
+    // Block expired, allow access
+    window.location.href = url;
+    return;
+  }
+  
+  // Show remaining time
+  var remaining = block.blockedUntil - Date.now();
+  var msg = document.createElement('p');
+  msg.style.cssText = 'text-align: center; font-size: 18px; margin-top: 20px; color: var(--primary);';
+  msg.id = 'temp-block-timer';
+  document.querySelector('.page-center').appendChild(msg);
+  
+  function updateTimer() {
+    var now = Date.now();
+    if (now >= block.blockedUntil) {
+      msg.textContent = '✓ Block expired! Redirecting...';
+      setTimeout(() => { window.location.href = url; }, 1000);
+      return;
+    }
+    
+    var remain = block.blockedUntil - now;
+    var minutes = Math.floor(remain / 60000);
+    var seconds = Math.floor((remain % 60000) / 1000);
+    msg.textContent = `⏱️ Unblocks in ${minutes}:${seconds.toString().padStart(2, '0')}`;
+    
+    setTimeout(updateTimer, 1000);
+  }
+  
+  updateTimer();
+}
+
 // Check if AI key is available; if not, skip intent step and show direct countdown
 (async function init() {
+  // Update UI based on block type
+  var $pageTitle = document.getElementById('page-title');
+  var $pageMsg = document.getElementById('page-msg');
+  
+  if (blockType === 'ai') {
+    $pageTitle.textContent = 'AI Detected Distraction';
+    $pageMsg.textContent = 'AI classified this site as potentially distracting.';
+  } else if (blockType === 'ai-temp') {
+    $pageTitle.textContent = 'Temporarily Blocked';
+    $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
+  }
+  
+  // Handle temporary AI block
+  if (blockType === 'ai-temp') {
+    await handleTempBlock();
+    return;
+  }
+
   var data = await chrome.storage.local.get(['hfApiKey', 'unlockCountdowns']);
   var key = data.hfApiKey;
   var countdowns = data.unlockCountdowns || {};

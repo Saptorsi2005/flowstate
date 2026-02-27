@@ -612,6 +612,25 @@ section {
   color: var(--danger);
 }
 
+.ai-result-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.ai-result-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
 /* AI Suggest (workspace detail) */
 .ai-badge-btn {
   display: inline-flex;
