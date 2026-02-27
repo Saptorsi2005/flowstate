@@ -31,7 +31,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["pages/blocked.html", "pages/soft-redirect.html"],
+      "resources": ["pages/blocked.html", "pages/soft-redirect.html", "pages/ai-escalation.html"],
       "matches": ["<all_urls>"]
     }
   ]

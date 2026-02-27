@@ -347,13 +347,14 @@ async function renderWorkspaces() {
       + (isSelected ? ' ws-card--selected' : '')
       + (isActive ? ' ws-card--active' : '');
 
-    const done = ws.todos.filter(t => t.completed).length;
-    const total = ws.todos.length;
+    const done = (ws.todos || []).filter(t => t.completed).length;
+    const total = (ws.todos || []).length;
+    const blockedCount = (ws.blockedDomains || []).length;
 
     card.innerHTML = `
       <div class="ws-card-info">
         <span class="ws-card-name">${esc(ws.name)}${isActive ? ' <span class="badge-active">ACTIVE</span>' : ''}</span>
-        <span class="ws-card-meta">${ws.focusMode} · ${ws.blockedDomains.length} blocked · ${total ? done + '/' + total + ' tasks' : '0 tasks'}</span>
+        <span class="ws-card-meta">${ws.focusMode || 'easy'} · ${blockedCount} blocked · ${total ? done + '/' + total + ' tasks' : '0 tasks'}</span>
       </div>
       <span class="ws-card-arrow">›</span>
     `;
@@ -368,6 +369,37 @@ async function selectWorkspace(id) {
   selectedWsId = id;
   const ws = await getWorkspace(id);
   if (!ws) return;
+  
+  // Ensure arrays exist (for backwards compatibility)
+  if (!ws.blockedDomains) ws.blockedDomains = [];
+  if (!ws.allowedDomains) ws.allowedDomains = [];
+  if (!ws.savedTabs) ws.savedTabs = [];
+  if (!ws.todos) ws.todos = [];
+  
+  // Clean up domains (extract hostname from URLs)
+  let needsSave = false;
+  ws.blockedDomains = ws.blockedDomains.map(d => {
+    try {
+      if (d.startsWith('http://') || d.startsWith('https://')) {
+        needsSave = true;
+        return new URL(d).hostname.replace(/^www\./, '');
+      }
+    } catch (e) { }
+    return d;
+  });
+  ws.allowedDomains = ws.allowedDomains.map(d => {
+    try {
+      if (d.startsWith('http://') || d.startsWith('https://')) {
+        needsSave = true;
+        return new URL(d).hostname.replace(/^www\./, '');
+      }
+    } catch (e) { }
+    return d;
+  });
+  
+  if (needsSave) {
+    await saveWorkspace(ws);
+  }
 
   $wsDetail.classList.remove('hidden');
   $wsDetailName.textContent = ws.name;
@@ -432,6 +464,11 @@ function renderDomainList(container, domains, type) {
       const domain = el.dataset.domain;
       const ws = await getWorkspace(selectedWsId);
       if (!ws) return;
+      
+      // Ensure arrays exist
+      if (!ws.blockedDomains) ws.blockedDomains = [];
+      if (!ws.allowedDomains) ws.allowedDomains = [];
+      
       if (type === 'blocked') {
         ws.blockedDomains = ws.blockedDomains.filter(d => d !== domain);
       } else {
@@ -636,10 +673,28 @@ async function setFocusMode(mode) {
 // ── Add Domain ─────────────────────────────────────────────────
 async function addDomain(type) {
   const input = type === 'blocked' ? $blockedInput : $allowedInput;
-  const val = input.value.trim().toLowerCase();
+  let val = input.value.trim().toLowerCase();
   if (!val || !selectedWsId) return;
 
   const ws = await getWorkspace(selectedWsId);
+  if (!ws) return;
+  
+  // Ensure arrays exist (for backwards compatibility)
+  if (!ws.blockedDomains) ws.blockedDomains = [];
+  if (!ws.allowedDomains) ws.allowedDomains = [];
+  
+  // Extract domain from URL if needed
+  try {
+    if (val.startsWith('http://') || val.startsWith('https://')) {
+      const url = new URL(val);
+      val = url.hostname;
+    }
+    // Remove www. prefix
+    val = val.replace(/^www\./, '');
+  } catch (e) {
+    // If not a valid URL, treat as domain string
+  }
+  
   const list = type === 'blocked' ? ws.blockedDomains : ws.allowedDomains;
   if (list.includes(val)) { input.value = ''; return; }
   list.push(val);
@@ -683,19 +738,47 @@ const $btnTestAi = document.getElementById('btn-test-ai');
 const $aiTestResult = document.getElementById('ai-test-result');
 const $btnAiSuggest = document.getElementById('btn-ai-suggest');
 const $aiSuggestResult = document.getElementById('ai-suggest-result');
+const $aiStatusText = document.getElementById('ai-status-text');
 
 // Load AI settings on init
 (async () => {
   try {
-    const { hfApiKey, aiEnabled } = await getState();
+    const { hfApiKey, aiEnabled, aiTestResult } = await getState();
     if (hfApiKey) {
       $hfApiKeyInput.value = hfApiKey;
       $keyStatus.textContent = '✓ Key saved';
       $keyStatus.className = 'ai-key-status ai-key-ok';
     }
     $aiEnabledToggle.checked = !!aiEnabled;
+    updateAiStatusText(!!aiEnabled);
+    
+    // Restore last test result if exists
+    if (aiTestResult) {
+      $aiTestResult.innerHTML = aiTestResult;
+      $aiTestResult.className = 'ai-test-result-box';
+      
+      // Re-attach close button handler
+      const closeBtn = $aiTestResult.querySelector('.ai-result-close');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', async () => {
+          $aiTestResult.className = 'hidden';
+          await setState({ aiTestResult: null });
+        });
+      }
+    }
   } catch { }
 })();
+
+// Update AI status text
+function updateAiStatusText(enabled) {
+  if (enabled) {
+    $aiStatusText.innerHTML = '✅ Enabled - AI will scan and block distracting sites<br><span style="font-size: 10px; opacity: 0.8;">Sites like Instagram, WhatsApp will be blocked (97%+ confidence)</span>';
+    $aiStatusText.style.color = 'var(--success)';
+  } else {
+    $aiStatusText.textContent = '❌ Disabled - Click toggle to enable';
+    $aiStatusText.style.color = 'var(--text-muted)';
+  }
+}
 
 // Collapsible toggle
 $aiSectionToggle.addEventListener('click', () => {
@@ -706,7 +789,15 @@ $aiSectionToggle.addEventListener('click', () => {
 
 // AI enable toggle
 $aiEnabledToggle.addEventListener('change', async () => {
-  await setAiEnabled($aiEnabledToggle.checked);
+  const enabled = $aiEnabledToggle.checked;
+  await setAiEnabled(enabled);
+  updateAiStatusText(enabled);
+  
+  // Show status message
+  const message = enabled 
+    ? '✓ AI Smart Blocking enabled - Checking all open tabs...' 
+    : '✓ AI Smart Blocking disabled - AI-blocked sites are now accessible';
+  showStatus(message, 'ok');
 });
 
 // Save API key
@@ -754,11 +845,26 @@ $btnTestAi.addEventListener('click', async () => {
     const pct = Math.round(res.topScore * 100);
     const icon = res.topLabel.includes('distraction') || res.topLabel.includes('social')
       ? '🚫' : res.topLabel.includes('productive') ? '✅' : '🔵';
-    $aiTestResult.innerHTML =
+    const resultHtml =
+      `<div style="display: flex; justify-content: space-between; align-items: start;">` +
+      `<div>` +
       `<span class="ai-result-domain">${esc(new URL(tab.url).hostname)}</span>` +
       `<br><span class="ai-result-label">${icon} ${esc(res.topLabel)}</span>` +
-      `<span class="ai-result-score">${pct}% confident</span>`;
+      `<span class="ai-result-score">${pct}% confident</span>` +
+      `</div>` +
+      `<button class="ai-result-close" title="Clear result">×</button>` +
+      `</div>`;
+    $aiTestResult.innerHTML = resultHtml;
     $aiTestResult.className = 'ai-test-result-box';
+    
+    // Add close button handler
+    $aiTestResult.querySelector('.ai-result-close').addEventListener('click', async () => {
+      $aiTestResult.className = 'hidden';
+      await setState({ aiTestResult: null });
+    });
+    
+    // Persist the result so it survives popup close/reopen
+    await setState({ aiTestResult: resultHtml });
   } catch (err) {
     $aiTestResult.textContent = '✗ ' + err.message;
     $aiTestResult.className = 'ai-test-result-box ai-result-err';
@@ -807,6 +913,7 @@ $btnAiSuggest.addEventListener('click', async () => {
     if ($doBlock) {
       $doBlock.addEventListener('click', async () => {
         const ws = await getWorkspace(selectedWsId);
+        if (!ws.blockedDomains) ws.blockedDomains = [];
         if (!ws.blockedDomains.includes(host)) {
           ws.blockedDomains.push(host);
           await saveWorkspace(ws);
@@ -818,6 +925,7 @@ $btnAiSuggest.addEventListener('click', async () => {
     if ($doAllow) {
       $doAllow.addEventListener('click', async () => {
         const ws = await getWorkspace(selectedWsId);
+        if (!ws.allowedDomains) ws.allowedDomains = [];
         if (!ws.allowedDomains.includes(host)) {
           ws.allowedDomains.push(host);
           await saveWorkspace(ws);

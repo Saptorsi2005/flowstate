@@ -19,6 +19,9 @@ const DEFAULT_STATE = {
   unlockCountdowns: {},
   hfApiKey: null,
   aiEnabled: false,
+  aiEscalationLevels: {}, // { domain: { level: 1-4, lastVisit: timestamp } }
+  aiTempBlocks: {}, // { domain: { blockedUntil: timestamp } }
+  aiTestResult: null, // Persisted test result HTML
 };
 
 export async function getState() {
@@ -87,4 +90,12 @@ export async function getApiKey() {
 
 export async function setAiEnabled(enabled) {
   await setState({ aiEnabled: !!enabled });
+  
+  // When disabling AI, clear all AI-related temporary data
+  if (!enabled) {
+    await setState({
+      aiEscalationLevels: {},
+      aiTempBlocks: {}
+    });
+  }
 }
