@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ActivityCalendar } from "react-activity-calendar";
+import { subDays, format } from "date-fns";
 
 export default function Profile() {
     const [isEditing, setIsEditing] = useState(false);
@@ -69,6 +71,37 @@ export default function Profile() {
             status: "in-progress",
         },
     ];
+
+    // Generate mock heatmap data (last 6 months)
+    const generateHeatmapData = () => {
+        const data = [];
+        const today = new Date();
+        const numDays = 180; // approx 6 months
+
+        for (let i = numDays; i >= 0; i--) {
+            const date = subDays(today, i);
+            // Higher chance of level 0 (no activity) or level 1 (low), some high activity
+            const random = Math.random();
+            let level = 0;
+            if (random > 0.4 && random <= 0.7) level = 1;
+            else if (random > 0.7 && random <= 0.85) level = 2;
+            else if (random > 0.85 && random <= 0.95) level = 3;
+            else if (random > 0.95) level = 4;
+
+            data.push({
+                date: format(date, "yyyy-MM-dd"),
+                count: level * 3, // mock count based on level
+                level: level,
+            });
+        }
+        return data;
+    };
+
+    // Theme for the activity calendar (matching our Cyan/Indigo glassy aesthetic)
+    const explicitTheme = {
+        light: ['#27272a', '#1e3a8a', '#1d4ed8', '#4338ca', '#22d3ee'],
+        dark: ['rgba(255,255,255,0.05)', 'rgba(34, 211, 238, 0.2)', 'rgba(34, 211, 238, 0.4)', 'rgba(34, 211, 238, 0.7)', '#22d3ee'],
+    };
 
     return (
         <>
@@ -406,6 +439,73 @@ export default function Profile() {
                 </div>
             </section>
 
+            {/* ===== ACTIVITY HEATMAP ===== */}
+            <section className="anim-fade-in-up anim-delay-7" style={{ marginTop: 48, paddingBottom: 64 }}>
+                <h2 className="section-title">Focus Activity</h2>
+
+                <div
+                    className="glass-card-static"
+                    style={{
+                        padding: "32px 24px",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        overflowX: "auto",
+                        overflowY: "hidden"
+                    }}
+                >
+                    <div style={{ width: "100%", maxWidth: 850 }}>
+                        <ActivityCalendar
+                            data={generateHeatmapData()}
+                            theme={explicitTheme}
+                            colorScheme="dark"
+                            blockSize={12}
+                            blockMargin={4}
+                            fontSize={12}
+                            labels={{
+                                legend: {
+                                    less: "Less",
+                                    more: "More"
+                                },
+                                months: [
+                                    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+                                ],
+                                totalCount: '{{count}} deep work sessions in the last 6 months',
+                            }}
+                            renderBlock={(block, activity) => {
+                                // Newer react-activity-calendar versions pass color in block.props.style.backgroundColor
+                                // Or we can rely squarely on our explicit theme and the activity level.
+                                const levelColor = block?.color || explicitTheme.dark[activity.level] || "#22d3ee";
+
+                                return (
+                                    <div
+                                        className="heatmap-block tooltip-trigger"
+                                        style={{
+                                            width: 12, height: 12,
+                                            borderRadius: 2,
+                                            backgroundColor: levelColor,
+                                            transition: "all 0.2s ease",
+                                            cursor: "pointer",
+                                        }}
+                                        key={activity.date}
+                                        title={`${activity.count} sessions on ${activity.date}`}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.transform = "scale(1.2)";
+                                            e.currentTarget.style.boxShadow = `0 0 8px ${levelColor}`;
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.transform = "scale(1)";
+                                            e.currentTarget.style.boxShadow = "none";
+                                        }}
+                                    />
+                                )
+                            }}
+                        />
+                    </div>
+                </div>
+            </section>
+
             {/* ===== GOALS HISTORY ===== */}
             <section className="anim-fade-in-up anim-delay-5">
                 <h2 className="section-title">Goals History</h2>
@@ -502,6 +602,8 @@ export default function Profile() {
                     </div>
                 </div>
             </section>
+
+
         </>
     );
 }
