@@ -1,14 +1,13 @@
 /**
  * lib/db.js — Neon Postgres client + auto-bootstrap
  *
- * Uses @neondatabase/serverless tagged template queries.
- * Tables are created automatically on the first cold start (CREATE TABLE IF NOT EXISTS).
- * No manual SQL or migrations needed.
+ * Tables are created automatically on first cold start.
+ * New columns are added via ALTER TABLE … ADD COLUMN IF NOT EXISTS
+ * so the live DB self-heals without manual migration.
  */
 
 import { neon } from '@neondatabase/serverless';
 
-// Module-level singleton — created once per Vercel function instance
 let _sql = null;
 
 export function getDb() {
@@ -20,20 +19,15 @@ export function getDb() {
   return _sql;
 }
 
-// Guard: only run CREATE TABLE statements once per cold start
 let _initialized = false;
 
-/**
- * initDB() — creates tables if they don't exist.
- * Safe to call at the top of every handler (no-op after first call).
- */
 export async function initDB() {
   if (_initialized) return;
   _initialized = true;
 
   const sql = getDb();
 
-  // Create users table first (workspaces references it)
+  // ── Create tables ─────────────────────────────────────────────
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id          TEXT PRIMARY KEY,
@@ -43,7 +37,6 @@ export async function initDB() {
     )
   `;
 
-  // Create workspaces table
   await sql`
     CREATE TABLE IF NOT EXISTS workspaces (
       id               TEXT PRIMARY KEY,
@@ -57,4 +50,10 @@ export async function initDB() {
       created_at       TIMESTAMP DEFAULT NOW()
     )
   `;
+
+  // ── Self-heal: add new columns if they don't exist ────────────
+  // Safe to run on a live DB — ADD COLUMN IF NOT EXISTS is idempotent.
+  await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_names TEXT[] DEFAULT '{}'`;
+  await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_domains JSONB DEFAULT '{}'`;
+  await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`;
 }

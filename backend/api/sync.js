@@ -1,14 +1,8 @@
 /**
  * api/sync.js — POST /api/sync
  *
- * Receives workspace data from the Chrome extension and persists it to Neon.
- *
- * GUARANTEES:
- *   - Tables are auto-created on cold start (no manual SQL needed)
- *   - User is upserted on every sync
- *   - Workspaces are replaced atomically (delete old → insert new)
- *   - Extension never depends on this endpoint succeeding
- *   - Fails gracefully with JSON error responses
+ * Receives workspace snapshots from the Chrome extension and persists to Neon.
+ * Extension never depends on this endpoint — fails gracefully.
  */
 
 import { verifyRequest, AuthError } from '../lib/auth.js';
@@ -31,7 +25,7 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') { res.status(204).end(); return; }
     if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-    // ── Ensure tables exist (no-op after first cold start) ────────
+    // ── Auto-create / heal tables ─────────────────────────────────
     try {
         await initDB();
     } catch (err) {
@@ -71,12 +65,12 @@ export default async function handler(req, res) {
         return;
     }
 
-    // ── Persist to Neon ───────────────────────────────────────────
+    // ── Persist ───────────────────────────────────────────────────
     try {
         const sql = getDb();
         const { sub: userId, email = null, name = null } = identity;
 
-        // 1. Upsert user (create on first sync, update email/name on subsequent)
+        // 1. Upsert user
         await sql`
       INSERT INTO users (id, email, name)
       VALUES (${userId}, ${email}, ${name})
@@ -85,16 +79,17 @@ export default async function handler(req, res) {
             name  = EXCLUDED.name
     `;
 
-        // 2. Replace workspaces: delete all for this user, then re-insert
-        //    This is simpler than partial upserts and ensures deleted workspaces
-        //    are removed from the backend mirror.
+        // 2. Replace workspaces (delete all, re-insert)
         await sql`DELETE FROM workspaces WHERE user_id = ${userId}`;
 
         for (const ws of workspaces) {
             await sql`
         INSERT INTO workspaces (
           id, user_id, name, focus_mode,
-          blocked_domains, allowed_domains, todos, saved_tabs_count
+          blocked_domains, allowed_domains,
+          blocked_group_names, blocked_group_domains,
+          todos, saved_tabs_count,
+          updated_at
         ) VALUES (
           ${ws.id},
           ${userId},
@@ -102,8 +97,11 @@ export default async function handler(req, res) {
           ${ws.focusMode ?? 'easy'},
           ${ws.blockedDomains ?? []},
           ${ws.allowedDomains ?? []},
+          ${ws.blockedGroupNames ?? []},
+          ${JSON.stringify(ws.blockedGroupDomains ?? {})},
           ${JSON.stringify(ws.todos ?? [])},
-          ${ws.savedTabsCount ?? 0}
+          ${ws.savedTabsCount ?? 0},
+          NOW()
         )
       `;
         }

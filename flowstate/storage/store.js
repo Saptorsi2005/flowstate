@@ -74,6 +74,8 @@ export function createWorkspace(name) {
     focusMode: 'easy',
     blockedDomains: [],
     allowedDomains: [],
+    blockedGroupNames: [],
+    blockedGroupDomains: {},
     savedTabs: [],
     todos: []
   };
@@ -90,7 +92,7 @@ export async function getApiKey() {
 
 export async function setAiEnabled(enabled) {
   await setState({ aiEnabled: !!enabled });
-  
+
   // When disabling AI, clear all AI-related temporary data
   if (!enabled) {
     await setState({
