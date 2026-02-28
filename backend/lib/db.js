@@ -27,7 +27,7 @@ export async function initDB() {
 
   const sql = getDb();
 
-  // ── Create tables ─────────────────────────────────────────────
+  // ── Core tables ───────────────────────────────────────────────
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id          TEXT PRIMARY KEY,
@@ -51,8 +51,25 @@ export async function initDB() {
     )
   `;
 
-  // ── Self-heal: add new columns if they don't exist ────────────
-  // All ADD COLUMN IF NOT EXISTS are idempotent — safe on live DB.
+  // ── Focus Stats table ─────────────────────────────────────────
+  await sql`
+    CREATE TABLE IF NOT EXISTS focus_stats (
+      id                   TEXT PRIMARY KEY,
+      user_id              TEXT NOT NULL,
+      workspace_id         TEXT NOT NULL,
+      date                 DATE NOT NULL,
+      deep_focus_minutes   INTEGER DEFAULT 0,
+      blocked_attempts     INTEGER DEFAULT 0,
+      successful_unlocks   INTEGER DEFAULT 0,
+      failed_unlocks       INTEGER DEFAULT 0,
+      strict_mode_minutes  INTEGER DEFAULT 0,
+      focus_score          INTEGER DEFAULT 0,
+      created_at           TIMESTAMP DEFAULT NOW(),
+      UNIQUE (workspace_id, date)
+    )
+  `;
+
+  // ── Self-heal: add workspace columns if missing ────────────────
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_names TEXT[] DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_domains JSONB DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`;

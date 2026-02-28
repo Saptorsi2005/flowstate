@@ -1,18 +1,7 @@
 /**
  * api/dashboard.js — GET /api/dashboard
  *
- * Returns real user + workspace data from Neon for the React dashboard.
- * Never called by the extension.
- *
- * Response:
- * {
- *   user:       { id, email, name, created_at },
- *   workspaces: [ ... ],
- *   stats: {
- *     totalWorkspaces,
- *     totalSavedTabs
- *   }
- * }
+ * Returns user, workspaces, and focus score stats for the React dashboard.
  */
 
 import { verifyRequest, AuthError } from '../lib/auth.js';
@@ -31,74 +20,73 @@ function setCors(res) {
 
 export default async function handler(req, res) {
     setCors(res);
-
     if (req.method === 'OPTIONS') { res.status(204).end(); return; }
     if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-    // ── Ensure tables exist ───────────────────────────────────────
-    try {
-        await initDB();
-    } catch (err) {
+    try { await initDB(); } catch (err) {
         console.error('[dashboard] initDB failed:', err.message);
-        res.status(500).json({ error: 'Database initialization failed' });
-        return;
+        res.status(500).json({ error: 'Database initialization failed' }); return;
     }
 
-    // ── Auth ──────────────────────────────────────────────────────
     let identity;
-    try {
-        identity = await verifyRequest(req);
-    } catch (err) {
-        res.status(err instanceof AuthError ? err.status : 401).json({ error: err.message });
-        return;
+    try { identity = await verifyRequest(req); } catch (err) {
+        res.status(err instanceof AuthError ? err.status : 401).json({ error: err.message }); return;
     }
 
-    // ── Rate limit: 60 reads/minute ───────────────────────────────
     const rl = checkRateLimit(rateLimitKey(identity.sub, 'dashboard'), 60, 60_000);
-    if (!rl.allowed) {
-        res.status(429).json({ error: 'Rate limit exceeded', resetMs: rl.resetMs });
-        return;
-    }
+    if (!rl.allowed) { res.status(429).json({ error: 'Rate limit exceeded', resetMs: rl.resetMs }); return; }
 
-    // ── Fetch data from Neon ──────────────────────────────────────
     try {
         const sql = getDb();
         const userId = identity.sub;
 
-        // Fetch user
-        const userRows = await sql`
-      SELECT id, email, name, created_at
-      FROM users
-      WHERE id = ${userId}
-    `;
-
+        // ── User ──────────────────────────────────────────────────────
+        const userRows = await sql`SELECT id, email, name, created_at FROM users WHERE id = ${userId}`;
         if (userRows.length === 0) {
-            // User has never synced — return empty state, not an error
             res.status(200).json({
-                user: null,
-                workspaces: [],
-                stats: { totalWorkspaces: 0, totalSavedTabs: 0 },
+                user: null, workspaces: [],
+                stats: { totalWorkspaces: 0, totalSavedTabs: 0, todayFocusScore: 0, weeklyAverageFocusScore: 0, todayBlockedAttempts: 0 },
             });
             return;
         }
-
         const user = userRows[0];
 
-        // Fetch workspaces
+        // ── Workspaces ────────────────────────────────────────────────
         const workspaces = await sql`
-      SELECT
-        id, name, focus_mode,
-        blocked_domains, allowed_domains,
-        todos, saved_tabs_count, created_at
-      FROM workspaces
-      WHERE user_id = ${userId}
-      ORDER BY created_at ASC
+      SELECT id, name, focus_mode, blocked_domains, allowed_domains,
+             todos, saved_tabs_count, created_at
+      FROM workspaces WHERE user_id = ${userId} ORDER BY created_at ASC
     `;
+        const totalSavedTabs = workspaces.reduce((s, w) => s + (w.saved_tabs_count ?? 0), 0);
 
-        // Compute stats
-        const totalSavedTabs = workspaces.reduce(
-            (sum, ws) => sum + (ws.saved_tabs_count ?? 0), 0
-        );
+        // ── Focus stats: today ─────────────────────────────────────────
+        // Aggregate across all workspaces for this user for today's date (UTC)
+        const todayRows = await sql`
+      SELECT
+        COALESCE(SUM(focus_score), 0)       AS total_score,
+        COALESCE(SUM(blocked_attempts), 0)  AS total_blocked,
+        COUNT(*)                            AS session_count
+      FROM focus_stats
+      WHERE user_id = ${userId}
+        AND date = CURRENT_DATE
+    `;
+        const todayFocusScore = todayRows[0]?.session_count > 0
+            ? Math.round(Number(todayRows[0].total_score) / Number(todayRows[0].session_count))
+            : 0;
+        const todayBlockedAttempts = Number(todayRows[0]?.total_blocked ?? 0);
+
+        // ── Focus stats: last 7 days average ──────────────────────────
+        const weeklyRows = await sql`
+      SELECT COALESCE(AVG(daily_avg), 0) AS weekly_avg
+      FROM (
+        SELECT date, AVG(focus_score) AS daily_avg
+        FROM focus_stats
+        WHERE user_id = ${userId}
+          AND date >= CURRENT_DATE - INTERVAL '6 days'
+        GROUP BY date
+      ) daily
+    `;
+        const weeklyAverageFocusScore = Math.round(Number(weeklyRows[0]?.weekly_avg ?? 0));
 
         res.status(200).json({
             user,
@@ -106,6 +94,9 @@ export default async function handler(req, res) {
             stats: {
                 totalWorkspaces: workspaces.length,
                 totalSavedTabs,
+                todayFocusScore,
+                weeklyAverageFocusScore,
+                todayBlockedAttempts,
             },
         });
 

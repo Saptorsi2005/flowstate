@@ -24,6 +24,12 @@ const _aiCache = new Map();
 let _previousTabId = null;
 let _currentTabId = null;
 
+// -- Focus Score Session Tracker -----------------------------
+// In-memory; resets each time a workspace is activated.
+// Counters are flushed to chrome.storage on deactivation.
+let _focusSession = null;
+// { wsId, focusMode, startTime, blockedAttempts, successfulUnlocks, failedUnlocks }
+
 // ── Social Media Domain Detection ────────────────────────────────
 // Brand names matched against the second-level domain (SLD).
 // Catches ALL subdomains (m., api., business.), mobile variants,
@@ -843,7 +849,19 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
     console.log('[FlowState onActivated] Checking tab:', tab.id, url);
 
-    // Skip extension & browser pages
+    // ── If tab is already on a block page, count as a blocked attempt ──
+    // This covers switching back to a tab that was previously redirected
+    // (tabs.onUpdated never fires again for it, so the counter never incremented).
+    const BLOCK_PAGES = ['blocked.html', 'soft-redirect.html', 'ai-escalation.html'];
+    if (url.startsWith('chrome-extension://') && BLOCK_PAGES.some(p => url.includes(p))) {
+      if (_focusSession) {
+        _focusSession.blockedAttempts++;
+        console.log('[FlowState] blockedAttempts++ (switched to existing block page). Total:', _focusSession.blockedAttempts);
+      }
+      return;
+    }
+
+    // Skip all other extension & browser pages
     if (url.startsWith('chrome-extension://') ||
       url.startsWith('chrome://') ||
       url.startsWith('about:') ||
@@ -1048,6 +1066,8 @@ function shouldAiBlock(topLabel, topScore, focusMode) {
 }
 
 function redirectBlocked(tabId, url, focusMode, blockType = 'manual') {
+  // -- Focus Score: count blocked attempt --
+  if (_focusSession) _focusSession.blockedAttempts++;
   const encoded = encodeURIComponent(url);
   let page;
 
@@ -1271,6 +1291,16 @@ async function activateWorkspace(id) {
 
     _aiCache.clear(); // Clear AI cache on new session
 
+    // -- Focus session: initialize tracking for this session --
+    _focusSession = {
+      wsId: id,
+      focusMode: ws.focusMode || 'easy',
+      startTime: Date.now(),
+      blockedAttempts: 0,
+      successfulUnlocks: 0,
+      failedUnlocks: 0,
+    };
+
     await chrome.storage.local.set({
       activeWorkspaceId: id,
       timer: { startTime: Date.now(), elapsed: 0, running: true },
@@ -1322,13 +1352,45 @@ async function deactivateWorkspace() {
       elapsed += Date.now() - timer.startTime;
     }
     _aiCache.clear();
+
+    // -- Focus Score Calculation ----------------------------------
+    if (_focusSession) {
+      const totalMinutes = Math.round(elapsed / 60000);
+      const isStrict = _focusSession.focusMode === 'strict';
+      const strictModeMinutes = isStrict ? totalMinutes : 0;
+      const deepFocusMinutes = Math.max(0, totalMinutes - _focusSession.blockedAttempts);
+
+      const rawScore = (deepFocusMinutes * 2)
+        - (_focusSession.blockedAttempts * 1.5)
+        - (_focusSession.failedUnlocks * 2)
+        + (strictModeMinutes * 1);
+      const focusScore = Math.max(0, Math.min(100, Math.round(rawScore)));
+
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const wsId = _focusSession.wsId;
+
+      const { dailyFocusStats = {} } = await chrome.storage.local.get('dailyFocusStats');
+      if (!dailyFocusStats[today]) dailyFocusStats[today] = {};
+      dailyFocusStats[today][wsId] = {
+        deepFocusMinutes,
+        blockedAttempts: _focusSession.blockedAttempts,
+        successfulUnlocks: _focusSession.successfulUnlocks,
+        failedUnlocks: _focusSession.failedUnlocks,
+        strictModeMinutes,
+        focusScore,
+      };
+      await chrome.storage.local.set({ dailyFocusStats });
+      console.log('[FlowState] Focus score saved:', focusScore, 'for ws', wsId, 'on', today);
+      _focusSession = null;
+    }
+
     await chrome.storage.local.set({
       activeWorkspaceId: null,
       timer: { startTime: null, elapsed, running: false },
       tempUnlockedDomains: [],
       unlockCountdowns: {},
-      aiEscalationLevels: {}, // Reset escalation levels
-      aiTempBlocks: {} // Clear temporary blocks
+      aiEscalationLevels: {},
+      aiTempBlocks: {}
     });
     return { success: true, elapsed };
   } catch (err) {
@@ -1347,6 +1409,7 @@ async function handleUnlock(domain, tabId) {
     delete unlockCountdowns[String(tabId)];
     await chrome.storage.local.set({ unlockCountdowns });
 
+    if (_focusSession) _focusSession.successfulUnlocks++;
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
