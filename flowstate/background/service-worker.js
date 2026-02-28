@@ -12,29 +12,35 @@
  *   6. Tab removal cleanup
  */
 
+import { initSyncListener } from "../utils/sync.js";
+
 const HF_API_URL =
   'https://router.huggingface.co/hf-inference/models/facebook/bart-large-mnli';
 
 // In-memory AI cache (tabId → {topLabel, topScore}) to avoid repeat calls
 const _aiCache = new Map();
 
+// Track the previously active tab so "Stay Focused" can return to it
+let _previousTabId = null;
+let _currentTabId = null;
+
 // ── Extension Reload/Install Handler ───────────────────────────
 // Reset workspace state when extension reloads/installs
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[FlowState] Extension loaded:', details.reason);
-  
+
   // Get current state
   const data = await chrome.storage.local.get(['activeWorkspaceId', 'timer']);
-  
+
   // If there's an active workspace, deactivate it
   if (data.activeWorkspaceId) {
     console.log('[FlowState] Auto-deactivating workspace on extension reload');
-    
+
     let elapsed = data.timer?.elapsed || 0;
     if (data.timer?.running && data.timer?.startTime) {
       elapsed += Date.now() - data.timer.startTime;
     }
-    
+
     // Reset to inactive state
     await chrome.storage.local.set({
       activeWorkspaceId: null,
@@ -44,9 +50,42 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       aiEscalationLevels: {},
       aiTempBlocks: {}
     });
-    
+
     _aiCache.clear();
-    console.log('[FlowState] Workspace deactivated, everything reset');
+    console.log('[FlowState] Workspace deactivated, restoring blocked tabs...');
+  }
+
+  // ── Restore blocked tabs after any reload/update ──────────────
+  // Find all tabs showing FlowState block pages and navigate them
+  // back to their original URLs so they don't go blank.
+  try {
+    const allTabs = await chrome.tabs.query({});
+    const blockPagePatterns = ['blocked.html', 'soft-redirect.html', 'ai-escalation.html'];
+
+    for (const tab of allTabs) {
+      if (!tab.url) continue;
+      const isBlockPage = blockPagePatterns.some(p => tab.url.includes(p));
+      if (!isBlockPage) continue;
+
+      try {
+        // Extract the original URL from the ?url= query param
+        const tabUrl = new URL(tab.url);
+        const originalUrl = tabUrl.searchParams.get('url');
+        if (originalUrl) {
+          const decoded = decodeURIComponent(originalUrl);
+          console.log('[FlowState] Restoring tab', tab.id, 'to:', decoded);
+          await chrome.tabs.update(tab.id, { url: decoded });
+        } else {
+          // No original URL stored — fall back to new tab
+          console.log('[FlowState] No original URL for tab', tab.id, '— opening new tab');
+          await chrome.tabs.update(tab.id, { url: 'chrome://newtab' });
+        }
+      } catch (e) {
+        console.warn('[FlowState] Could not restore tab', tab.id, e);
+      }
+    }
+  } catch (e) {
+    console.warn('[FlowState] Error restoring blocked tabs on reload:', e);
   }
 });
 
@@ -54,89 +93,89 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // When AI Smart Blocking is toggled on, check all open tabs
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local') return;
-  
+
   // Handle AI being enabled/disabled
   if (changes.aiEnabled) {
     const wasEnabled = changes.aiEnabled.oldValue;
     const nowEnabled = changes.aiEnabled.newValue;
-    
+
     // AI was just turned OFF - clear cache
     if (wasEnabled && !nowEnabled) {
       console.log('[FlowState] AI Smart Blocking disabled, clearing cache...');
       _aiCache.clear();
       return;
     }
-    
+
     // AI was just turned ON - check all currently open tabs
     if (!wasEnabled && nowEnabled) {
       console.log('[FlowState] AI Smart Blocking enabled, checking all open tabs...');
-      
+
       // Small delay to ensure popup has closed and tab states are stable
       await new Promise(resolve => setTimeout(resolve, 200));
-      
+
       const data = await chrome.storage.local.get([
-        'activeWorkspaceId', 
-        'workspaces', 
-        'hfApiKey', 
-        'aiEscalationLevels', 
+        'activeWorkspaceId',
+        'workspaces',
+        'hfApiKey',
+        'aiEscalationLevels',
         'aiTempBlocks',
         'tempUnlockedDomains'
       ]);
-      
+
       if (!data.activeWorkspaceId) {
         console.log('[FlowState] No active workspace, skipping AI check');
         return;
       }
-      
+
       const ws = data.workspaces?.[data.activeWorkspaceId];
       if (!ws || !data.hfApiKey) {
         console.log('[FlowState] No workspace or API key, skipping AI check');
         return;
       }
-      
+
       try {
         // Get ALL tabs from all windows
         const allTabs = await chrome.tabs.query({});
         // Find the currently active tab across all windows
         const currentActiveTab = allTabs.find(t => t.active);
-        
+
         console.log('[FlowState] Found', allTabs.length, 'tabs to check');
         console.log('[FlowState] Current active tab:', currentActiveTab?.id, currentActiveTab?.url);
-        
+
         // Process current active tab FIRST for immediate feedback
-        const tabsToProcess = currentActiveTab 
+        const tabsToProcess = currentActiveTab
           ? [currentActiveTab, ...allTabs.filter(t => t.id !== currentActiveTab.id)]
           : allTabs;
-        
+
         for (const tab of tabsToProcess) {
           if (!tab.url) continue;
-          
+
           const url = tab.url;
-          
+
           // Skip extension & browser pages
           if (url.startsWith('chrome-extension://') ||
-              url.startsWith('chrome://') ||
-              url.startsWith('about:') ||
-              url.startsWith('edge://')) continue;
-          
+            url.startsWith('chrome://') ||
+            url.startsWith('about:') ||
+            url.startsWith('edge://')) continue;
+
           const domain = getDomain(url);
           if (!domain) continue;
-          
+
           // Skip if manually blocked (already handled) or allowed
           if (isDomainInList(domain, ws.blockedDomains)) continue;
           if (isDomainInList(domain, ws.allowedDomains)) continue;
-          
+
           // Skip if temp unlocked
           const unlocked = data.tempUnlockedDomains || [];
           if (unlocked.some(u => u.tabId === tab.id && domain.includes(u.domain))) continue;
-          
+
           const isCurrentActiveTab = currentActiveTab && tab.id === currentActiveTab.id;
           console.log('[FlowState] Checking tab:', domain, 'ID:', tab.id, isCurrentActiveTab ? '(CURRENT ACTIVE)' : '');
-          
+
           // Check if we have a cached AI result for this tab
           const cacheKey = `${tab.id}:${domain}`;
           const cachedResult = _aiCache.get(cacheKey);
-          
+
           if (cachedResult) {
             // We have a cached result - check if it should be blocked
             console.log('[FlowState] Found cached AI result for:', domain, cachedResult);
@@ -207,7 +246,7 @@ async function callBartMNLI(text, candidateLabels, apiKey) {
     throw new Error(`API Error (${res.status}): ${t.slice(0, 100)}`);
   }
   const data = await res.json();
-  
+
   // Handle model loading state
   if (data.error) {
     console.error('HuggingFace API error:', data);
@@ -216,7 +255,7 @@ async function callBartMNLI(text, candidateLabels, apiKey) {
     }
     throw new Error(`AI Error: ${data.error.slice(0, 100)}`);
   }
-  
+
   // Handle array format: [{label: '...', score: 0.x}, ...]
   if (Array.isArray(data) && data.length > 0 && data[0].label && data[0].score !== undefined) {
     return {
@@ -224,12 +263,12 @@ async function callBartMNLI(text, candidateLabels, apiKey) {
       scores: data.map(item => item.score)
     };
   }
-  
+
   // Handle object format: {labels: [...], scores: [...]}
   if (data.labels && data.scores && Array.isArray(data.labels)) {
     return data;
   }
-  
+
   // Unexpected format
   console.error('Unexpected HuggingFace response structure:', data);
   throw new Error('⏳ Model is starting up. Wait 30 seconds and click "Test AI" again.');
@@ -302,7 +341,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // ── 2. AI Smart Blocking (if enabled and key exists) ──
   if (data.aiEnabled && data.hfApiKey) {
     console.log('[FlowState] AI blocking enabled, checking domain:', domain);
-    
+
     // Check temporary AI blocks
     const aiTempBlocks = data.aiTempBlocks || {};
     if (aiTempBlocks[domain] && aiTempBlocks[domain].blockedUntil > Date.now()) {
@@ -329,25 +368,31 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 // ── Tab Activation (switching to existing tab) ─────────────────
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
+    // Track previous tab for "Stay Focused" redirect
+    if (_currentTabId !== null && _currentTabId !== activeInfo.tabId) {
+      _previousTabId = _currentTabId;
+    }
+    _currentTabId = activeInfo.tabId;
+
     // Small delay to ensure tab is ready
     await new Promise(resolve => setTimeout(resolve, 50));
-    
+
     const tab = await chrome.tabs.get(activeInfo.tabId);
     if (!tab.url) return;
-    
+
     const url = tab.url;
-    
+
     console.log('[FlowState onActivated] Checking tab:', tab.id, url);
-    
+
     // Skip extension & browser pages
     if (url.startsWith('chrome-extension://') ||
-        url.startsWith('chrome://') ||
-        url.startsWith('about:') ||
-        url.startsWith('edge://')) {
+      url.startsWith('chrome://') ||
+      url.startsWith('about:') ||
+      url.startsWith('edge://')) {
       console.log('[FlowState onActivated] Skipping system page');
       return;
     }
-    
+
     const data = await chrome.storage.local.get(
       ['activeWorkspaceId', 'workspaces', 'tempUnlockedDomains', 'hfApiKey', 'aiEnabled', 'aiEscalationLevels', 'aiTempBlocks']
     );
@@ -355,41 +400,41 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       console.log('[FlowState onActivated] No active workspace');
       return;
     }
-    
+
     const ws = (data.workspaces || {})[data.activeWorkspaceId];
     if (!ws) {
       console.log('[FlowState onActivated] Workspace not found');
       return;
     }
-    
+
     const domain = getDomain(url);
     if (!domain) return;
-    
+
     console.log('[FlowState onActivated] Tab activated:', domain, 'Blocked list:', ws.blockedDomains);
-    
+
     // Temp-unlocked domains (tab-specific, from intent unlock)
     const unlocked = data.tempUnlockedDomains || [];
     if (unlocked.some(u => u.tabId === activeInfo.tabId && domain.includes(u.domain))) return;
-    
+
     // Allowed domains take priority over blocked
     if (isDomainInList(domain, ws.allowedDomains)) {
       console.log('[FlowState] Domain allowed:', domain);
       return;
     }
-    
+
     // ── 1. Manual blocklist check ──
     const manuallyBlocked = isDomainInList(domain, ws.blockedDomains);
-    
+
     if (manuallyBlocked) {
       console.log('[FlowState] Blocking activated tab (manual):', domain);
       redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
       return;
     }
-    
+
     // ── 2. AI Smart Blocking (if enabled and key exists) ──
     if (data.aiEnabled && data.hfApiKey) {
       console.log('[FlowState] AI blocking enabled for activated tab:', domain);
-      
+
       // Check temporary AI blocks
       const aiTempBlocks = data.aiTempBlocks || {};
       if (aiTempBlocks[domain] && aiTempBlocks[domain].blockedUntil > Date.now()) {
@@ -397,7 +442,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         redirectBlocked(activeInfo.tabId, url, 'strict', 'ai-temp-block');
         return;
       }
-      
+
       // Don't re-classify if we already processed this tab+url
       const cacheKey = `${activeInfo.tabId}:${domain}`;
       if (_aiCache.has(cacheKey)) {
@@ -407,7 +452,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         }
         return;
       }
-      
+
       // Run AI classification asynchronously
       classifyAndMaybeBlock(activeInfo.tabId, url, domain, ws, data.hfApiKey, data);
     }
@@ -419,7 +464,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 async function classifyAndMaybeBlock(tabId, url, domain, ws, apiKey, data) {
   try {
     console.log('[FlowState AI] Classifying:', domain, 'for tab', tabId);
-    
+
     // Get tab title if available
     let title = '';
     try {
@@ -429,7 +474,7 @@ async function classifyAndMaybeBlock(tabId, url, domain, ws, apiKey, data) {
 
     const result = await aiClassifySite(url, title, apiKey);
     _aiCache.set(`${tabId}:${domain}`, result);
-    
+
     console.log('[FlowState AI] Classification result:', domain, result);
 
     if (shouldAiBlock(result.topLabel, result.topScore, ws.focusMode)) {
@@ -446,7 +491,7 @@ async function classifyAndMaybeBlock(tabId, url, domain, ws, apiKey, data) {
 // ── AI Escalation Logic ────────────────────────────────────────
 async function handleAiBlocking(tabId, url, domain, focusMode, data) {
   console.log('[FlowState AI] handleAiBlocking called for tab', tabId, domain, 'focusMode:', focusMode);
-  
+
   if (focusMode === 'strict') {
     // STRICT MODE: Immediate block
     console.log('[FlowState AI] STRICT mode - immediate block');
@@ -457,7 +502,7 @@ async function handleAiBlocking(tabId, url, domain, focusMode, data) {
   // EASY MODE: Escalation levels
   const escalationLevels = data.aiEscalationLevels || {};
   const current = escalationLevels[domain] || { level: 0, lastVisit: 0 };
-  
+
   // Reset if more than 1 hour since last visit
   const ONE_HOUR = 60 * 60 * 1000;
   if (Date.now() - current.lastVisit > ONE_HOUR) {
@@ -467,7 +512,7 @@ async function handleAiBlocking(tabId, url, domain, focusMode, data) {
   // Increment level
   current.level = Math.min(current.level + 1, 4);
   current.lastVisit = Date.now();
-  
+
   escalationLevels[domain] = current;
   await chrome.storage.local.set({ aiEscalationLevels: escalationLevels });
 
@@ -508,7 +553,10 @@ function shouldAiBlock(topLabel, topScore, focusMode) {
 function redirectBlocked(tabId, url, focusMode, blockType = 'manual') {
   const encoded = encodeURIComponent(url);
   let page;
-  
+
+  // Determine the previous (focus) tab to return to when user clicks "Stay Focused"
+  const prevId = (_previousTabId !== null && _previousTabId !== tabId) ? _previousTabId : null;
+
   if (blockType === 'ai-temp-block') {
     // Temporary AI block (always strict)
     page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=ai-temp`;
@@ -517,11 +565,12 @@ function redirectBlocked(tabId, url, focusMode, blockType = 'manual') {
     page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=ai`;
   } else {
     // Manual block (use focus mode)
+    const prevParam = prevId !== null ? `&prevTabId=${prevId}` : '';
     page = focusMode === 'strict'
       ? `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=manual`
-      : `pages/soft-redirect.html?url=${encoded}&tabId=${tabId}&mode=${focusMode}`;
+      : `pages/soft-redirect.html?url=${encoded}&tabId=${tabId}&mode=${focusMode}${prevParam}`;
   }
-  
+
   chrome.tabs.update(tabId, { url: chrome.runtime.getURL(page) });
 }
 
@@ -655,3 +704,92 @@ async function handleUnlock(domain, tabId) {
     return { success: false, error: err.message };
   }
 }
+
+initSyncListener();
+
+// ── Auth0 Device Code Flow polling (lives in SW so popup close is safe) ─────
+// Popup sends FS_START_DEVICE_POLL → SW stores deviceCode + schedules alarms
+// On each alarm: one poll attempt → store syncJwt on approval → popup onChanged fires
+
+const _AUTH_ALARM = 'flowstate-auth-poll';
+const _AUTH_API = 'https://flowstate-backend.vercel.app';
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'FS_START_DEVICE_POLL') {
+    const interval = Math.max(msg.interval ?? 5, 5);
+    chrome.storage.local
+      .set({ _pendingDeviceCode: msg.deviceCode, _pollIntervalSecs: interval })
+      .then(() => {
+        chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: interval / 60 });
+        sendResponse({ ok: true });
+      });
+    return true;
+  }
+
+  if (msg.type === 'FS_CANCEL_DEVICE_POLL') {
+    chrome.alarms.clear(_AUTH_ALARM);
+    chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+    sendResponse({ ok: true });
+    return true;
+  }
+});
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== _AUTH_ALARM) return;
+
+  const { _pendingDeviceCode, _pollIntervalSecs } =
+    await chrome.storage.local.get(['_pendingDeviceCode', '_pollIntervalSecs']);
+  if (!_pendingDeviceCode) return;
+
+  const intervalSecs = _pollIntervalSecs ?? 5;
+
+  try {
+    const res = await fetch(`${_AUTH_API}/api/auth/device-poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceCode: _pendingDeviceCode }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    console.log('[FlowState SW Auth] poll:', data.status);
+
+    if (data.status === 'approved' && data.accessToken) {
+      // Store JWT — popup's storage.onChanged listener will update UI
+      await chrome.storage.local.set({ syncJwt: data.accessToken });
+
+      // Decode and store user info for display in popup
+      try {
+        const [, payload] = data.accessToken.split('.');
+        const user = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        await chrome.storage.local.set({
+          syncUser: { email: user.email || null, name: user.name || user.email || 'User', sub: user.sub || null }
+        });
+      } catch { /* decode failed — JWT still stored, email just won't show */ }
+
+      await chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+      return; // done
+    }
+
+    if (data.status === 'expired' || data.status === 'denied' || data.status === 'error') {
+      await chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+      return; // done (failed)
+    }
+
+    // Still pending — reschedule
+    chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: intervalSecs / 60 });
+
+  } catch (err) {
+    console.warn('[FlowState SW Auth] poll error:', err.message);
+    chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: intervalSecs / 60 });
+  }
+});
+
+// ── Startup sync: fire a sync shortly after SW wakes ─────────────────────────
+// Catches already-logged-in users whose workspaces predate login,
+// or who reloaded the extension — no workspace change needed to trigger.
+chrome.storage.local.get('syncJwt').then(({ syncJwt }) => {
+  if (syncJwt) {
+    console.log('[FlowState Sync] SW startup: scheduling immediate sync for logged-in user');
+    chrome.alarms.create('flowstate-sync', { delayInMinutes: 0.1 }); // ~6 seconds
+  }
+});

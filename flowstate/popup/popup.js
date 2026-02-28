@@ -4,12 +4,14 @@
  * Section 1: Tab Organizer by Category (existing, fully preserved)
  * Section 2: Workspace, Todo, Timer, Focus Mode (new features)
  * Section 3: AI Settings (facebook/bart-large-mnli via HF Inference API)
+ * Section 4: Connect Account (Auth0 Device Code Flow — additive only)
  */
 import {
   getState, setState, getWorkspaces, getWorkspace, saveWorkspace,
   deleteWorkspace, createWorkspace, setActiveWorkspaceId,
   saveApiKey, getApiKey, setAiEnabled
 } from '../storage/store.js';
+import { startDeviceFlow, pollDeviceFlow, getStoredJwt, getStoredUser, logout } from '../utils/auth.js';
 import { formatTime } from '../utils/timer.js';
 
 // ═══════════════════════════════════════════════════════════════
@@ -369,13 +371,13 @@ async function selectWorkspace(id) {
   selectedWsId = id;
   const ws = await getWorkspace(id);
   if (!ws) return;
-  
+
   // Ensure arrays exist (for backwards compatibility)
   if (!ws.blockedDomains) ws.blockedDomains = [];
   if (!ws.allowedDomains) ws.allowedDomains = [];
   if (!ws.savedTabs) ws.savedTabs = [];
   if (!ws.todos) ws.todos = [];
-  
+
   // Clean up domains (extract hostname from URLs)
   let needsSave = false;
   ws.blockedDomains = ws.blockedDomains.map(d => {
@@ -396,7 +398,7 @@ async function selectWorkspace(id) {
     } catch (e) { }
     return d;
   });
-  
+
   if (needsSave) {
     await saveWorkspace(ws);
   }
@@ -464,11 +466,11 @@ function renderDomainList(container, domains, type) {
       const domain = el.dataset.domain;
       const ws = await getWorkspace(selectedWsId);
       if (!ws) return;
-      
+
       // Ensure arrays exist
       if (!ws.blockedDomains) ws.blockedDomains = [];
       if (!ws.allowedDomains) ws.allowedDomains = [];
-      
+
       if (type === 'blocked') {
         ws.blockedDomains = ws.blockedDomains.filter(d => d !== domain);
       } else {
@@ -678,11 +680,11 @@ async function addDomain(type) {
 
   const ws = await getWorkspace(selectedWsId);
   if (!ws) return;
-  
+
   // Ensure arrays exist (for backwards compatibility)
   if (!ws.blockedDomains) ws.blockedDomains = [];
   if (!ws.allowedDomains) ws.allowedDomains = [];
-  
+
   // Extract domain from URL if needed
   try {
     if (val.startsWith('http://') || val.startsWith('https://')) {
@@ -694,7 +696,7 @@ async function addDomain(type) {
   } catch (e) {
     // If not a valid URL, treat as domain string
   }
-  
+
   const list = type === 'blocked' ? ws.blockedDomains : ws.allowedDomains;
   if (list.includes(val)) { input.value = ''; return; }
   list.push(val);
@@ -751,12 +753,12 @@ const $aiStatusText = document.getElementById('ai-status-text');
     }
     $aiEnabledToggle.checked = !!aiEnabled;
     updateAiStatusText(!!aiEnabled);
-    
+
     // Restore last test result if exists
     if (aiTestResult) {
       $aiTestResult.innerHTML = aiTestResult;
       $aiTestResult.className = 'ai-test-result-box';
-      
+
       // Re-attach close button handler
       const closeBtn = $aiTestResult.querySelector('.ai-result-close');
       if (closeBtn) {
@@ -792,10 +794,10 @@ $aiEnabledToggle.addEventListener('change', async () => {
   const enabled = $aiEnabledToggle.checked;
   await setAiEnabled(enabled);
   updateAiStatusText(enabled);
-  
+
   // Show status message
-  const message = enabled 
-    ? '✓ AI Smart Blocking enabled - Checking all open tabs...' 
+  const message = enabled
+    ? '✓ AI Smart Blocking enabled - Checking all open tabs...'
     : '✓ AI Smart Blocking disabled - AI-blocked sites are now accessible';
   showStatus(message, 'ok');
 });
@@ -856,13 +858,13 @@ $btnTestAi.addEventListener('click', async () => {
       `</div>`;
     $aiTestResult.innerHTML = resultHtml;
     $aiTestResult.className = 'ai-test-result-box';
-    
+
     // Add close button handler
     $aiTestResult.querySelector('.ai-result-close').addEventListener('click', async () => {
       $aiTestResult.className = 'hidden';
       await setState({ aiTestResult: null });
     });
-    
+
     // Persist the result so it survives popup close/reopen
     await setState({ aiTestResult: resultHtml });
   } catch (err) {
@@ -942,3 +944,171 @@ $btnAiSuggest.addEventListener('click', async () => {
     $btnAiSuggest.textContent = '✦ AI Suggest';
   }
 });
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 4: CONNECT ACCOUNT (Auth0 Device Code Flow)
+// Additive only — no changes to blocking/AI/timer logic.
+// If user is not logged in, all existing features work exactly as before.
+// ═══════════════════════════════════════════════════════════════
+
+// ── DOM refs ───────────────────────────────────────────────────
+const $accountSectionToggle = document.getElementById('account-section-toggle');
+const $accountSectionBody = document.getElementById('account-section-body');
+const $accountToggleArrow = document.getElementById('account-toggle-arrow');
+const $accountLoggedOut = document.getElementById('account-logged-out');
+const $accountLoggedIn = document.getElementById('account-logged-in');
+const $accountStepConnect = document.getElementById('account-step-connect');
+const $accountStepCode = document.getElementById('account-step-code');
+const $btnConnectAccount = document.getElementById('btn-connect-account');
+const $accountVerifyLink = document.getElementById('account-verify-link');
+const $accountUserCode = document.getElementById('account-user-code');
+const $btnCopyCode = document.getElementById('btn-copy-code');
+const $accountPollStatus = document.getElementById('account-poll-status');
+const $btnCancelLogin = document.getElementById('btn-cancel-login');
+const $accountError = document.getElementById('account-error');
+const $accountEmail = document.getElementById('account-email');
+const $btnLogout = document.getElementById('btn-logout');
+
+// Track active poll so we can cancel it
+let _pollCancelFlag = false;
+
+// ── Collapsible toggle ─────────────────────────────────────────
+$accountSectionToggle.addEventListener('click', () => {
+  const open = !$accountSectionBody.classList.contains('hidden');
+  $accountSectionBody.classList.toggle('hidden', open);
+  $accountToggleArrow.style.transform = open ? '' : 'rotate(90deg)';
+});
+
+// ── Init: render correct state on popup open ───────────────────
+(async () => {
+  console.log('[FlowState Popup] Init: checking auth state…');
+  try {
+    const [jwt, user] = await Promise.all([getStoredJwt(), getStoredUser()]);
+    console.log('[FlowState Popup] Init result — jwt:', !!jwt, '| user:', user);
+    if (jwt && user) {
+      showLoggedIn(user);
+    } else if (jwt) {
+      // JWT exists but syncUser wasn't stored — show partial logged-in state
+      showLoggedIn({ email: '(connected)', name: 'Connected' });
+    } else {
+      showLoggedOut();
+    }
+  } catch (e) {
+    console.warn('[FlowState Popup] Init error:', e);
+    showLoggedOut();
+  }
+})();
+
+// ── Storage listener: update UI the moment syncJwt is written ──
+// This fires even if the popup was open during polling and the Promise
+// resolved but the popup's UI state wasn't updated yet.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+
+  if (changes.syncJwt) {
+    const newJwt = changes.syncJwt.newValue;
+    console.log('[FlowState Popup] storage.onChanged — syncJwt changed:', !!newJwt);
+    if (newJwt) {
+      // Token just arrived — read user and update UI
+      getStoredUser().then(user => {
+        console.log('[FlowState Popup] Switching to logged-in. user:', user);
+        showLoggedIn(user || { email: '(connected)', name: 'Connected' });
+      });
+    } else {
+      // Token was removed (logout)
+      showLoggedOut();
+    }
+  }
+});
+
+// ── Connect button ─────────────────────────────────────────────
+// Popup's only job: start the device flow and hand deviceCode to the SW.
+// All polling happens in service-worker.js (survives popup close).
+// storage.onChanged listener above updates UI when SW writes syncJwt.
+$btnConnectAccount.addEventListener('click', async () => {
+  $btnConnectAccount.disabled = true;
+  $btnConnectAccount.textContent = 'Starting…';
+  hideError();
+
+  try {
+    const flow = await startDeviceFlow();
+
+    // Show the code step in the popup
+    $accountStepConnect.classList.add('hidden');
+    $accountStepCode.classList.remove('hidden');
+    $accountUserCode.textContent = flow.userCode;
+    $accountVerifyLink.href = flow.verificationUri;
+    $accountVerifyLink.textContent = flow.verificationUri;
+    $accountPollStatus.textContent = '⏳ Waiting for you to log in…';
+
+    // Delegate ALL polling to the service worker
+    // SW uses chrome.alarms — survives this popup closing
+    chrome.runtime.sendMessage({
+      type: 'FS_START_DEVICE_POLL',
+      deviceCode: flow.deviceCode,
+      interval: flow.interval,
+    }).catch(() => { });
+
+    // Open the verification page — popup may close, that's fine
+    chrome.tabs.create({ url: flow.verificationUri, active: true });
+
+  } catch (err) {
+    showError(err.message || 'Could not start login. Check your connection.');
+    $btnConnectAccount.disabled = false;
+    $btnConnectAccount.textContent = 'Connect Account';
+  }
+});
+
+// ── Copy code button ───────────────────────────────────────────
+$btnCopyCode.addEventListener('click', () => {
+  const code = $accountUserCode.textContent;
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => {
+    $btnCopyCode.textContent = '✓';
+    setTimeout(() => { $btnCopyCode.textContent = '⎘'; }, 1200);
+  }).catch(() => { });
+});
+
+// ── Cancel login ───────────────────────────────────────────────
+$btnCancelLogin.addEventListener('click', () => {
+  _pollCancelFlag = true;
+  resetToConnectStep();
+});
+
+// ── Logout ─────────────────────────────────────────────────────
+$btnLogout.addEventListener('click', async () => {
+  await logout();
+  showLoggedOut();
+  showStatus('✓ Logged out', 'ok');
+});
+
+// ── UI helpers ─────────────────────────────────────────────────
+function showLoggedIn(user) {
+  $accountLoggedOut.classList.add('hidden');
+  $accountLoggedIn.classList.remove('hidden');
+  $accountEmail.textContent = user?.email || user?.name || '(no email)';
+}
+
+function showLoggedOut() {
+  $accountLoggedIn.classList.add('hidden');
+  $accountLoggedOut.classList.remove('hidden');
+  resetToConnectStep();
+}
+
+function resetToConnectStep() {
+  $accountStepCode.classList.add('hidden');
+  $accountStepConnect.classList.remove('hidden');
+  $btnConnectAccount.disabled = false;
+  $btnConnectAccount.textContent = 'Connect Account';
+}
+
+function showError(msg) {
+  $accountError.textContent = msg;
+  $accountError.classList.remove('hidden');
+}
+
+function hideError() {
+  $accountError.classList.add('hidden');
+  $accountError.textContent = '';
+}
+
