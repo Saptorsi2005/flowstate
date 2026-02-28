@@ -6,9 +6,9 @@
  */
 
 // ── Phase durations ──────────────────────────────────────────────
-export const WORK_MS = 25 * 60 * 1000;  // 25 minutes
-export const BREAK_MS = 5 * 60 * 1000;   //  5 minutes
-export const WARN_MS = 1 * 60 * 1000;    //  1 minute warning before break ends
+export const WORK_MS = 30 * 1000;   // 30 seconds (test)
+export const BREAK_MS = 30 * 1000;  // 30 seconds (test)
+export const WARN_MS = 10 * 1000;   // 10 seconds warning (test)
 
 // ── Alarm names (must be globally unique within the extension) ───
 export const ALARM_WORK_END = 'fs-pomodoro-work-end';
