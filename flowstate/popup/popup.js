@@ -246,11 +246,10 @@ function getCategory(url) {
   return 'Other';
 }
 
-/** Build Map<category, Tab[]>. Skips internal pages and already-grouped tabs. */
+/** Build Map<category, Tab[]>. Skips internal pages. */
 function groupTabsByCategory(tabs) {
   const map = new Map();
   for (const tab of tabs) {
-    if (tab.groupId && tab.groupId !== -1) continue;   // already grouped
     const category = getCategory(tab.url);
     if (!category) continue;
     if (!map.has(category)) map.set(category, []);
@@ -262,18 +261,49 @@ function groupTabsByCategory(tabs) {
 /** Create a colored, titled tab group for each category. */
 async function createTabGroups(categoryMap) {
   let fallbackIdx = 0;
+  
+  // Get all groups in the current window to check for existing categories
+  const existingGroups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
+
   for (const [category, tabs] of categoryMap) {
     if (tabs.length === 0) continue;
     const tabIds = tabs.map(t => t.id);
-    const groupId = await chrome.tabs.group({ tabIds });
-    // Use fixed category color, or rotate fallback colors for unknown categories
-    const color = CATEGORY_COLORS[category]
-      || FALLBACK_COLORS[fallbackIdx++ % FALLBACK_COLORS.length];
-    await chrome.tabGroups.update(groupId, {
-      title: category,
-      color: color,
-      collapsed: tabs.length > 3
-    });
+
+    // Look for any existing groups with this name (case-insensitive)
+    const matchingGroups = existingGroups.filter(g => 
+      g.title && g.title.trim().toLowerCase() === category.toLowerCase()
+    );
+
+    let targetGroupId;
+
+    if (matchingGroups.length > 0) {
+      // Use the first existing group as the primary one
+      targetGroupId = matchingGroups[0].id;
+      
+      // Move the new tabs into this existing group
+      await chrome.tabs.group({ tabIds, groupId: targetGroupId });
+
+      // If more than one group exists with the same name, merge them all into the first one
+      if (matchingGroups.length > 1) {
+        for (let i = 1; i < matchingGroups.length; i++) {
+          const extraGroup = matchingGroups[i];
+          const extraTabs = await chrome.tabs.query({ groupId: extraGroup.id });
+          if (extraTabs.length > 0) {
+            await chrome.tabs.group({ tabIds: extraTabs.map(t => t.id), groupId: targetGroupId });
+          }
+        }
+      }
+    } else {
+      // No existing group found, create a new one
+      targetGroupId = await chrome.tabs.group({ tabIds });
+      const color = CATEGORY_COLORS[category] || FALLBACK_COLORS[fallbackIdx++ % FALLBACK_COLORS.length];
+      
+      await chrome.tabGroups.update(targetGroupId, {
+        title: category,
+        color: color,
+        collapsed: tabs.length > 3
+      });
+    }
   }
 }
 
