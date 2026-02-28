@@ -5,12 +5,13 @@
  */
 
 var params = new URLSearchParams(window.location.search);
-var url    = params.get('url') ? decodeURIComponent(params.get('url')) : null;
-var tabId  = params.get('tabId') ? parseInt(params.get('tabId'), 10) : null;
+var url = params.get('url') ? decodeURIComponent(params.get('url')) : null;
+var tabId = params.get('tabId') ? parseInt(params.get('tabId'), 10) : null;
+var prevTabId = params.get('prevTabId') ? parseInt(params.get('prevTabId'), 10) : null;
 var focusMode = params.get('mode') || 'easy';
 
 var domain = '';
-try { domain = new URL(url).hostname; } catch(e) {}
+try { domain = new URL(url).hostname; } catch (e) { }
 
 document.getElementById('target-url').textContent = domain || url || 'Unknown site';
 
@@ -20,7 +21,7 @@ document.getElementById('target-url').textContent = domain || url || 'Unknown si
 // ── Listen for focus mode changes ──────────────────────────────
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local') return;
-  
+
   // Handle AI Smart Blocking being disabled
   if (changes.aiEnabled) {
     const aiEnabled = changes.aiEnabled.newValue;
@@ -33,16 +34,16 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
       // User can click "Continue Anyway" if they want
     }
   }
-  
+
   // Handle focus mode changes
   if (changes.workspaces) {
     try {
       const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
       if (!data.activeWorkspaceId) return;
-      
+
       const ws = data.workspaces?.[data.activeWorkspaceId];
       if (!ws) return;
-      
+
       // If focus mode changed to strict, reload as blocked page
       if (ws.focusMode === 'strict' && focusMode !== 'strict') {
         console.log('[FlowState] Focus mode changed to strict, switching page');
@@ -70,63 +71,83 @@ if (focusMode === 'strict') {
   if (pageMsg) pageMsg.textContent = 'This site is blocked in strict mode. You must stay focused.';
 }
 
-document.getElementById('btn-stay').addEventListener('click', async function() {
-  console.log('[FlowState] Stay Focused clicked');
+document.getElementById('btn-stay').addEventListener('click', async function () {
+  console.log('[FlowState] Stay Focused clicked, prevTabId:', prevTabId);
   try {
-    // Get workspace info to check blocked domains
+    // ── Load current workspace state first (domains may have changed) ──
     const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
     const ws = data.workspaces?.[data.activeWorkspaceId];
     const blockedDomains = ws?.blockedDomains || [];
-    
-    console.log('[FlowState] Blocked domains:', blockedDomains);
-    
-    // Helper to check if a URL is blocked
-    function isUrlBlocked(url) {
-      if (!url) return false;
+    const allowedDomains = ws?.allowedDomains || [];
+
+    // Helper: returns true if a URL is currently blocked
+    function isUrlBlocked(checkUrl) {
+      if (!checkUrl) return false;
+      if (checkUrl.startsWith('chrome-extension://') ||
+        checkUrl.startsWith('chrome://') ||
+        checkUrl.startsWith('about:')) return false;
       try {
-        const domain = new URL(url).hostname.replace(/^www\./, '');
+        const d = new URL(checkUrl).hostname.replace(/^www\./, '');
+        // Explicitly allowed → never considered blocked
+        const isAllowed = allowedDomains.some(a => {
+          const ca = a.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
+          return d.includes(ca) || ca.includes(d);
+        });
+        if (isAllowed) return false;
+        // In blocked list → blocked
         return blockedDomains.some(blocked => {
           const cleanBlocked = blocked.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
-          return domain.includes(cleanBlocked) || cleanBlocked.includes(domain);
+          return d.includes(cleanBlocked) || cleanBlocked.includes(d);
         });
-      } catch {
-        return false;
+      } catch { return false; }
+    }
+
+    // ── 1. Try to return to the exact previous tab ──────────────
+    // Validate against CURRENT domain list — allowed domains may have changed
+    if (prevTabId !== null) {
+      try {
+        const prevTab = await chrome.tabs.get(prevTabId);
+        if (prevTab &&
+          !isUrlBlocked(prevTab.url) &&
+          !prevTab.url.includes('soft-redirect.html') &&
+          !prevTab.url.includes('blocked.html') &&
+          !prevTab.url.includes('ai-escalation.html')) {
+          console.log('[FlowState] Returning to previous tab:', prevTabId, prevTab.url);
+          await chrome.tabs.update(prevTabId, { active: true });
+          return;
+        } else {
+          console.log('[FlowState] Previous tab is now blocked or a redirect page, falling back to search');
+        }
+      } catch (e) {
+        // Tab no longer exists — fall through to search below
+        console.log('[FlowState] Previous tab', prevTabId, 'no longer exists, falling back to search');
       }
     }
-    
-    // Get all tabs to find a non-blocked tab to switch to
+
+    // ── 2. Fallback: find any non-blocked tab ───────────────────
     const tabs = await chrome.tabs.query({ currentWindow: true });
     const currentTab = await chrome.tabs.getCurrent();
-    
-    console.log('[FlowState] Current tab:', currentTab?.id, 'Total tabs:', tabs.length);
-    
-    if (currentTab && tabs.length > 1) {
-      // Find the first tab that's not this blocking page AND not a blocked domain
-      const targetTab = tabs.find(t => 
-        t.id !== currentTab.id && 
-        !t.url.startsWith('chrome-extension://') &&
-        !t.url.includes('soft-redirect.html') &&
-        !t.url.includes('blocked.html') &&
-        !t.url.includes('ai-escalation.html') &&
-        !isUrlBlocked(t.url)
-      );
-      
-      if (targetTab) {
-        console.log('[FlowState] Switching to tab:', targetTab.id, targetTab.url);
-        // Switch to the non-blocked tab, but keep this warning tab open
-        await chrome.tabs.update(targetTab.id, { active: true });
-      } else {
-        console.log('[FlowState] No suitable non-blocked tab found, creating new tab');
-        // No other tabs, create a new tab
-        await chrome.tabs.create({ url: 'chrome://newtab', active: true });
-      }
+
+    console.log('[FlowState] Fallback tab search. Current tab:', currentTab?.id, 'Total tabs:', tabs.length);
+
+    const targetTab = tabs.find(t =>
+      t.id !== currentTab?.id &&
+      !t.url.startsWith('chrome-extension://') &&
+      !t.url.includes('soft-redirect.html') &&
+      !t.url.includes('blocked.html') &&
+      !t.url.includes('ai-escalation.html') &&
+      !isUrlBlocked(t.url)
+    );
+
+    if (targetTab) {
+      console.log('[FlowState] Switching to fallback tab:', targetTab.id, targetTab.url);
+      await chrome.tabs.update(targetTab.id, { active: true });
     } else {
-      console.log('[FlowState] Only one tab or no current tab, creating new tab');
+      console.log('[FlowState] No suitable tab found, opening new tab');
       await chrome.tabs.create({ url: 'chrome://newtab', active: true });
     }
   } catch (e) {
     console.error('[FlowState] Error in Stay Focused:', e);
-    // Fallback: create a new tab
     try {
       await chrome.tabs.create({ url: 'chrome://newtab', active: true });
     } catch (err) {
@@ -135,14 +156,14 @@ document.getElementById('btn-stay').addEventListener('click', async function() {
   }
 });
 
-document.getElementById('btn-continue').addEventListener('click', async function() {
+document.getElementById('btn-continue').addEventListener('click', async function () {
   console.log('[FlowState] Continue Anyway clicked');
   // Double-check we're not in strict mode
   if (focusMode === 'strict') {
     console.warn('[FlowState] Continue blocked - strict mode');
     return;
   }
-  
+
   try {
     await chrome.runtime.sendMessage({
       type: 'request-unlock',
@@ -151,7 +172,7 @@ document.getElementById('btn-continue').addEventListener('click', async function
     });
     console.log('[FlowState] Unlocked, navigating to:', url);
     window.location.href = url;
-  } catch(e) {
+  } catch (e) {
     console.error('[FlowState] Error unlocking:', e);
     window.location.href = url;
   }
