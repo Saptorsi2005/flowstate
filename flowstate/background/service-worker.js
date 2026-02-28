@@ -1067,7 +1067,7 @@ function shouldAiBlock(topLabel, topScore, focusMode) {
 
 function redirectBlocked(tabId, url, focusMode, blockType = 'manual') {
   // -- Focus Score: count blocked attempt --
-  if (_focusSession) _focusSession.blockedAttempts++;
+  if (_focusSession) { _focusSession.blockedAttempts++; chrome.storage.local.set({ activeFocusSession: _focusSession }); }
   const encoded = encodeURIComponent(url);
   let page;
 
@@ -1292,7 +1292,9 @@ async function activateWorkspace(id) {
     _aiCache.clear(); // Clear AI cache on new session
 
     // -- Focus session: initialize tracking for this session --
+    const sessionId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     _focusSession = {
+      sessionId,
       wsId: id,
       focusMode: ws.focusMode || 'easy',
       startTime: Date.now(),
@@ -1300,6 +1302,8 @@ async function activateWorkspace(id) {
       successfulUnlocks: 0,
       failedUnlocks: 0,
     };
+    // Persist to storage so score survives SW restart (MV3 ephemeral SW fix)
+    await chrome.storage.local.set({ activeFocusSession: _focusSession });
 
     await chrome.storage.local.set({
       activeWorkspaceId: id,
@@ -1354,6 +1358,12 @@ async function deactivateWorkspace() {
     _aiCache.clear();
 
     // -- Focus Score Calculation ----------------------------------
+    // Recover session from storage if SW was restarted (MV3 ephemeral SW fix)
+    if (!_focusSession) {
+      const stored = await chrome.storage.local.get('activeFocusSession');
+      if (stored.activeFocusSession) _focusSession = stored.activeFocusSession;
+    }
+
     if (_focusSession) {
       const totalMinutes = Math.round(elapsed / 60000);
       const isStrict = _focusSession.focusMode === 'strict';
@@ -1367,11 +1377,14 @@ async function deactivateWorkspace() {
       const focusScore = Math.max(0, Math.min(100, Math.round(rawScore)));
 
       const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      const wsId = _focusSession.wsId;
+      const { sessionId } = _focusSession;
 
       const { dailyFocusStats = {} } = await chrome.storage.local.get('dailyFocusStats');
-      if (!dailyFocusStats[today]) dailyFocusStats[today] = {};
-      dailyFocusStats[today][wsId] = {
+      // Store by sessionId so each session is its own entry in the DB
+      dailyFocusStats[sessionId] = {
+        id: sessionId,
+        workspace_id: _focusSession.wsId,
+        date: today,
         deepFocusMinutes,
         blockedAttempts: _focusSession.blockedAttempts,
         successfulUnlocks: _focusSession.successfulUnlocks,
@@ -1380,8 +1393,9 @@ async function deactivateWorkspace() {
         focusScore,
       };
       await chrome.storage.local.set({ dailyFocusStats });
-      console.log('[FlowState] Focus score saved:', focusScore, 'for ws', wsId, 'on', today);
+      console.log('[FlowState] Focus score saved:', focusScore, 'for ws', _focusSession.wsId, 'on', today);
       _focusSession = null;
+      await chrome.storage.local.remove('activeFocusSession'); // clean up persisted session
     }
 
     await chrome.storage.local.set({
@@ -1409,7 +1423,7 @@ async function handleUnlock(domain, tabId) {
     delete unlockCountdowns[String(tabId)];
     await chrome.storage.local.set({ unlockCountdowns });
 
-    if (_focusSession) _focusSession.successfulUnlocks++;
+    if (_focusSession) { _focusSession.successfulUnlocks++; chrome.storage.local.set({ activeFocusSession: _focusSession }); }
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };

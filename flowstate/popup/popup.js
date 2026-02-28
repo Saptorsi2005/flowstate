@@ -1240,28 +1240,39 @@ async function renderFocusScore() {
   if (!dailyFocusStats) { $focusScoreStrip.classList.add('hidden'); return; }
 
   const today = new Date().toISOString().slice(0, 10);
-  const todayMap = dailyFocusStats[today];
-  if (!todayMap || Object.keys(todayMap).length === 0) {
+
+  let latestSession = null;
+  let maxSessionId = '';
+
+  for (const [id, stat] of Object.entries(dailyFocusStats)) {
+    if (stat.date === today) {
+      // sessionId starts with Date.now().toString(36), so alphabetical sort perfectly finds the latest
+      if (id > maxSessionId) {
+        maxSessionId = id;
+        latestSession = stat;
+      }
+    }
+  }
+
+  if (!latestSession) {
     $focusScoreStrip.classList.add('hidden'); return;
   }
 
-  // Aggregate across all workspaces for today
-  let totalScore = 0, totalBlocked = 0, totalSessions = 0;
-  for (const stat of Object.values(todayMap)) {
-    totalScore += stat.focusScore ?? 0;
-    totalBlocked += stat.blockedAttempts ?? 0;
-    totalSessions++;
-  }
-  const avgScore = Math.round(totalScore / totalSessions);
+  const score = latestSession.focusScore ?? 0;
+  const blocks = latestSession.blockedAttempts ?? 0;
 
   // Color tier
   $focusScoreRing.className = 'focus-score-ring';
-  if (avgScore < 30) $focusScoreRing.classList.add('focus-score-ring--red');
-  else if (avgScore < 60) $focusScoreRing.classList.add('focus-score-ring--amber');
+  if (score < 30) $focusScoreRing.classList.add('focus-score-ring--red');
+  else if (score < 60) $focusScoreRing.classList.add('focus-score-ring--amber');
   // else stays green (default)
 
-  $focusScoreValue.textContent = avgScore;
-  $focusScoreSub.textContent = `${totalBlocked} block${totalBlocked !== 1 ? 's' : ''} · ${totalSessions} session${totalSessions !== 1 ? 's' : ''}`;
+  $focusScoreValue.textContent = score;
+
+  const $title = document.querySelector('.focus-score-label');
+  if ($title) $title.textContent = 'LAST SESSION SCORE';
+
+  $focusScoreSub.textContent = `${blocks} block${blocks !== 1 ? 's' : ''}`;
   $focusScoreStrip.classList.remove('hidden');
 }
 

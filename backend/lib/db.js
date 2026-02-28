@@ -2,8 +2,7 @@
  * lib/db.js — Neon Postgres client + auto-bootstrap
  *
  * Tables are created automatically on first cold start.
- * New columns are added via ALTER TABLE … ADD COLUMN IF NOT EXISTS
- * so the live DB self-heals without manual migration.
+ * Schema evolves via self-healing ALTER TABLE / DROP CONSTRAINT statements.
  */
 
 import { neon } from '@neondatabase/serverless';
@@ -51,7 +50,7 @@ export async function initDB() {
     )
   `;
 
-  // ── Focus Stats table ─────────────────────────────────────────
+  // ── Focus Stats: one row PER SESSION (no unique workspace+date constraint) ──
   await sql`
     CREATE TABLE IF NOT EXISTS focus_stats (
       id                   TEXT PRIMARY KEY,
@@ -64,9 +63,15 @@ export async function initDB() {
       failed_unlocks       INTEGER DEFAULT 0,
       strict_mode_minutes  INTEGER DEFAULT 0,
       focus_score          INTEGER DEFAULT 0,
-      created_at           TIMESTAMP DEFAULT NOW(),
-      UNIQUE (workspace_id, date)
+      created_at           TIMESTAMP DEFAULT NOW()
     )
+  `;
+
+  // Drop the old UNIQUE(workspace_id, date) constraint if it exists
+  // (it prevented multiple sessions per workspace per day)
+  await sql`
+    ALTER TABLE focus_stats
+    DROP CONSTRAINT IF EXISTS focus_stats_workspace_id_date_key
   `;
 
   // ── Self-heal: add workspace columns if missing ────────────────

@@ -1,6 +1,6 @@
 /**
  * utils/sync.js — Background sync from extension to backend
- * Sends workspaces + daily focus_stats to /api/sync.
+ * Sends workspaces + per-session focus_stats to /api/sync.
  */
 
 const API_URL = 'https://flowstate-backend.vercel.app/api/sync';
@@ -44,22 +44,23 @@ async function syncToBackend() {
         savedTabsCount: (ws.savedTabs || []).length,
     }));
 
-    // Flatten dailyFocusStats { date: { wsId: statObj } } → array
+    // dailyFocusStats is now keyed by sessionId:
+    // { sessionId: { id, workspace_id, date, ...stats } }
     const focus_stats = [];
     const statsMap = data.dailyFocusStats || {};
-    for (const [date, workspaceMap] of Object.entries(statsMap)) {
-        for (const [wsId, stat] of Object.entries(workspaceMap)) {
-            focus_stats.push({
-                workspace_id: wsId,
-                date,
-                deep_focus_minutes: stat.deepFocusMinutes ?? 0,
-                blocked_attempts: stat.blockedAttempts ?? 0,
-                successful_unlocks: stat.successfulUnlocks ?? 0,
-                failed_unlocks: stat.failedUnlocks ?? 0,
-                strict_mode_minutes: stat.strictModeMinutes ?? 0,
-                focus_score: stat.focusScore ?? 0,
-            });
-        }
+    for (const stat of Object.values(statsMap)) {
+        if (!stat.id || !stat.workspace_id || !stat.date) continue;
+        focus_stats.push({
+            id: stat.id,
+            workspace_id: stat.workspace_id,
+            date: stat.date,
+            deep_focus_minutes: stat.deepFocusMinutes ?? 0,
+            blocked_attempts: stat.blockedAttempts ?? 0,
+            successful_unlocks: stat.successfulUnlocks ?? 0,
+            failed_unlocks: stat.failedUnlocks ?? 0,
+            strict_mode_minutes: stat.strictModeMinutes ?? 0,
+            focus_score: stat.focusScore ?? 0,
+        });
     }
 
     console.log(`[FlowState Sync] Syncing ${workspaces.length} workspace(s), ${focus_stats.length} focus stat(s)…`);
