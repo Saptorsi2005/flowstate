@@ -1,0 +1,23 @@
+import { Outlet } from "react-router-dom";
+
+export default function AuthLayout() {
+    return (
+        <div
+            style={{
+                minHeight: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative",
+                background: "radial-gradient(circle at 20% 20%, #0f172a, #020617)",
+            }}
+        >
+            {/* Ambient Background */}
+            <div className="ambient-glow ambient-glow-1" />
+            <div className="ambient-glow ambient-glow-2" />
+
+            {/* Render auth pages */}
+            <Outlet />
+        </div>
+    );
+}

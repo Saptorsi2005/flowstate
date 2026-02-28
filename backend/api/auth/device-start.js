@@ -2,16 +2,6 @@
  * api/auth/device-start.js — POST /api/auth/device-start
  *
  * Initiates Auth0 Device Authorization Flow for the Chrome extension.
- * The extension can't use redirect_uri-based flows (no browser page to return to).
- * Device Flow is the correct OAuth2 grant for extensions.
- *
- * Flow:
- *   1. Extension calls this endpoint (no auth required)
- *   2. We call Auth0 /oauth/device/code
- *   3. Return device_code, user_code, verification_uri to extension
- *   4. Extension shows user_code in popup + opens verification_uri
- *   5. User logs in on verification page
- *   6. Extension polls /api/auth/device-poll until approved
  */
 
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
@@ -24,17 +14,26 @@ const CORS_HEADERS = {
     'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+function setCors(res) {
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+}
+
 export default async function handler(req, res) {
+    setCors(res);
+
     if (req.method === 'OPTIONS') {
-        return res.status(204).set(CORS_HEADERS).end();
+        res.status(204).end();
+        return;
     }
 
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        res.status(405).json({ error: 'Method not allowed' });
+        return;
     }
 
     if (!AUTH0_DOMAIN || !CLIENT_ID) {
-        return res.status(500).set(CORS_HEADERS).json({ error: 'Auth not configured' });
+        res.status(500).json({ error: 'Auth not configured' });
+        return;
     }
 
     try {
@@ -52,22 +51,22 @@ export default async function handler(req, res) {
 
         if (!auth0Res.ok) {
             console.error('[device-start] Auth0 error:', data);
-            return res.status(502).set(CORS_HEADERS).json({
+            res.status(502).json({
                 error: data.error_description || 'Auth0 device flow failed',
             });
+            return;
         }
 
-        // Return only what the extension needs
-        return res.status(200).set(CORS_HEADERS).json({
+        res.status(200).json({
             deviceCode: data.device_code,
             userCode: data.user_code,
             verificationUri: data.verification_uri_complete ?? data.verification_uri,
-            expiresIn: data.expires_in,       // seconds
-            interval: data.interval,          // polling interval in seconds
+            expiresIn: data.expires_in,
+            interval: data.interval,
         });
 
     } catch (err) {
         console.error('[device-start] Error:', err);
-        return res.status(500).set(CORS_HEADERS).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 }

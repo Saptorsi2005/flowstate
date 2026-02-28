@@ -153,6 +153,58 @@
       </div>
     </section>
 
+    <!-- ── Connect Account Section (Auth0 Device Flow) ── -->
+    <section id="account-section">
+      <div class="ai-section-header" id="account-section-toggle">
+        <span>🔗 Connect Account</span>
+        <span id="account-toggle-arrow">›</span>
+      </div>
+
+      <div id="account-section-body" class="hidden">
+
+        <!-- Logged-out state -->
+        <div id="account-logged-out">
+          <p class="ai-desc">Sync workspaces &amp; view focus stats on the dashboard.</p>
+
+          <!-- Step 1: Start login -->
+          <div id="account-step-connect">
+            <button id="btn-connect-account" class="btn-activate" style="margin-top:8px">
+              Connect Account
+            </button>
+            <p id="account-error" class="hidden" style="color:var(--danger);font-size:12px;margin-top:6px"></p>
+          </div>
+
+          <!-- Step 2: Show user code after device flow starts -->
+          <div id="account-step-code" class="hidden">
+            <p class="detail-label" style="margin-top:8px">Visit this URL and enter the code:</p>
+            <a id="account-verify-link" href="#" target="_blank"
+               style="display:block;font-size:12px;color:var(--primary);margin:4px 0;word-break:break-all"></a>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+              <span id="account-user-code"
+                    style="font-size:22px;font-weight:700;letter-spacing:4px;color:var(--primary);font-family:monospace"></span>
+              <button id="btn-copy-code" class="btn-sm" title="Copy code">⎘</button>
+            </div>
+            <p id="account-poll-status" style="font-size:12px;color:var(--text-muted);margin-top:6px">
+              ⏳ Waiting for login…
+            </p>
+            <button id="btn-cancel-login" class="btn-sm btn-danger-sm" style="margin-top:8px">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Logged-in state -->
+        <div id="account-logged-in" class="hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+            <div>
+              <p class="detail-label" style="margin:0">✅ Connected</p>
+              <p id="account-email" style="font-size:12px;color:var(--text-muted);margin:2px 0 0"></p>
+            </div>
+            <button id="btn-logout" class="btn-sm btn-danger-sm">Logout</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
   </div>
 
   <script src="popup.js" type="module"></script>

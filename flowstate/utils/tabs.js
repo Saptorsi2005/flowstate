@@ -31,16 +31,10 @@ export function getDomain(url) {
 /**
  * Build a Map<domain, Tab[]> from an array of chrome.tabs.Tab objects.
  * Tabs whose URL cannot be parsed (or is a browser-internal page) are skipped.
- *
- * Tabs that are already in a group are also skipped so we don't
- * regroup them unnecessarily on repeated clicks.
  */
 export function groupTabsByDomain(tabs) {
   const map = new Map();
   for (const tab of tabs) {
-    // Skip tabs that are already grouped
-    if (tab.groupId && tab.groupId !== -1) continue;
-
     const domain = getDomain(tab.url);
     if (!domain) continue;
 
@@ -52,29 +46,44 @@ export function groupTabsByDomain(tabs) {
 
 /**
  * Create a chrome tab group for each domain in the map.
- *
- * How chrome.tabs.group works:
- *   - Takes an array of tab IDs and moves them into a new (or existing) group.
- *   - Returns a groupId.
- *   - We then call chrome.tabGroups.update() to set a human-readable title
- *     and a color so each domain is visually distinct.
- *   - Groups with > 2 tabs are auto-collapsed to reduce clutter.
  */
 export async function createTabGroups(domainMap) {
   let colorIdx = 0;
+  const existingGroups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
 
   for (const [domain, tabs] of domainMap) {
     if (tabs.length === 0) continue;
+    const tabIds = tabs.map(t => t.id);
 
-    const tabIds  = tabs.map(t => t.id);
-    const groupId = await chrome.tabs.group({ tabIds });
+    // Look for any existing groups with this name (case-insensitive)
+    const matchingGroups = existingGroups.filter(g => 
+      g.title && g.title.trim().toLowerCase() === domain.toLowerCase()
+    );
 
-    await chrome.tabGroups.update(groupId, {
-      title:     domain,
-      color:     GROUP_COLORS[colorIdx % GROUP_COLORS.length],
-      collapsed: tabs.length > 2
-    });
+    let targetGroupId;
 
-    colorIdx++;
+    if (matchingGroups.length > 0) {
+      targetGroupId = matchingGroups[0].id;
+      await chrome.tabs.group({ tabIds, groupId: targetGroupId });
+
+      // Merge other groups with the same title
+      if (matchingGroups.length > 1) {
+        for (let i = 1; i < matchingGroups.length; i++) {
+          const extraGroup = matchingGroups[i];
+          const extraTabs = await chrome.tabs.query({ groupId: extraGroup.id });
+          if (extraTabs.length > 0) {
+            await chrome.tabs.group({ tabIds: extraTabs.map(t => t.id), groupId: targetGroupId });
+          }
+        }
+      }
+    } else {
+      targetGroupId = await chrome.tabs.group({ tabIds });
+      await chrome.tabGroups.update(targetGroupId, {
+        title: domain,
+        color: GROUP_COLORS[colorIdx % GROUP_COLORS.length],
+        collapsed: tabs.length > 2
+      });
+      colorIdx++;
+    }
   }
 }
