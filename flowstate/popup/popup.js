@@ -405,7 +405,7 @@ async function renderHeatmap() {
   if (!$heatmapContainer || !$heatmapTooltip) return;
   $heatmapContainer.innerHTML = '';
 
-  let heatmapData = {};
+  let sessions = [];
   
   try {
     const { syncJwt } = await chrome.storage.local.get('syncJwt');
@@ -416,43 +416,47 @@ async function renderHeatmap() {
       });
       if (res.ok) {
         const data = await res.json();
-        heatmapData = data.heatmap || {};
+        sessions = data.sessions || [];
       }
     }
   } catch (err) {
     console.warn('[FlowState] Could not fetch heatmap data:', err.message);
   }
 
-  // Generate grid for the last 140 days (approx 20 weeks * 7 days)
-  const daysToRender = 140; 
-  const today = new Date();
+  // We want to fill a grid of 154 cells (approx 22 weeks * 7 days)
+  const maxCells = 154;
   
-  // Create grid cells
-  for (let i = daysToRender; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
+  // Create grid cells (latest sessions first, but we render them to fill the grid)
+  // If we have fewer than 154 sessions, first cells will be empty (grey)
+  for (let i = 0; i < maxCells; i++) {
+    // Fill from total minus sessions.length down to 0
+    const sessionIndex = (maxCells - 1) - i;
+    const session = sessions[sessionIndex];
     
-    const dayStats = heatmapData[dateStr] || { score: 0, sessions: 0 };
-    
-    // Map actual focus_score (0-100) to level 0-4
     let level = 0;
-    if (dayStats.score > 0) {
-      if (dayStats.score < 30) level = 1;         // Needs improvement (e.g. lots of blocks/fails)
-      else if (dayStats.score < 60) level = 2;    // Okay focus
-      else if (dayStats.score < 85) level = 3;    // Good focus
-      else level = 4;                             // Excellent focus
+    let tooltipText = "No session data";
+
+    if (session) {
+      const score = session.score || 0;
+      if (score > 0) {
+        if (score < 30) level = 1;
+        else if (score < 60) level = 2;
+        else if (score < 85) level = 3;
+        else level = 4;
+      }
+
+      const date = new Date(session.started_at);
+      const displayDate = date.toLocaleDateString(undefined, { 
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+      });
+      const durationMins = Math.round((session.duration || 0) / 60000);
+      
+      tooltipText = `Score: ${score} · ${durationMins} min · ${session.blocks || 0} blocks\n${displayDate}`;
     }
 
     const cell = document.createElement('div');
     cell.className = 'heatmap-cell';
     cell.dataset.level = level;
-    
-    // Format date string for tooltip, e.g., "Oct 14, 2024"
-    const displayDate = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-    const tooltipText = dayStats.sessions === 0 
-      ? `No focus on ${displayDate}` 
-      : `Score: ${dayStats.score} across ${dayStats.sessions} session${dayStats.sessions !== 1 ? 's' : ''} on ${displayDate}`;
 
     cell.addEventListener('mouseenter', (e) => {
       // Setup tooltip text

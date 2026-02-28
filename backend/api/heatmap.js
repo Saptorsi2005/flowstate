@@ -40,34 +40,21 @@ export default async function handler(req, res) {
         const sql = getDb();
         const userId = identity.sub;
 
-        // Query the focus_stats for the user over the last 140 days, aggregating the focus_score per day
-        const rows = await sql`
+        // Query the latest 154 sessions (22 weeks * 7 days grid) for the user
+        const sessions = await sql`
       SELECT 
-        date, 
-        ROUND(AVG(focus_score)) as score, 
-        SUM(blocked_attempts) as blocks,
-        COUNT(*) as sessions
+        id,
+        focus_score as score, 
+        blocked_attempts as blocks,
+        total_duration_ms as duration,
+        start_time as started_at
       FROM focus_stats
       WHERE user_id = ${userId}
-        AND date >= CURRENT_DATE - INTERVAL '140 days'
-      GROUP BY date
-      ORDER BY date ASC
+      ORDER BY start_time DESC
+      LIMIT 154
     `;
 
-        // Format as an array/map of date strings to stats
-        const heatmapData = {};
-        for (const row of rows) {
-            // Neon's postgres might return Date objects or strings based on parsing. 
-            // We ensure it's formatted as YYYY-MM-DD
-            const dateStr = row.date instanceof Date ? row.date.toISOString().slice(0, 10) : new Date(row.date).toISOString().slice(0, 10);
-            heatmapData[dateStr] = {
-                score: Number(row.score ?? 0),
-                blocks: Number(row.blocks ?? 0),
-                sessions: Number(row.sessions ?? 0)
-            };
-        }
-
-        res.status(200).json({ heatmap: heatmapData });
+        res.status(200).json({ sessions });
 
     } catch (err) {
         console.error('[heatmap] DB error:', err.message, err.stack);
