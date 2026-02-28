@@ -52,8 +52,9 @@ export async function initDB() {
   `;
 
   // ── Self-heal: add new columns if they don't exist ────────────
-  // Safe to run on a live DB — ADD COLUMN IF NOT EXISTS is idempotent.
+  // All ADD COLUMN IF NOT EXISTS are idempotent — safe on live DB.
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_names TEXT[] DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_domains JSONB DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`;
+  await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS allowed_group_names TEXT[] DEFAULT '{}'`;
 }

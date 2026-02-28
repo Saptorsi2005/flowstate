@@ -1,16 +1,9 @@
 /**
  * utils/sync.js — Background sync from extension to backend
- *
- * GUARANTEES:
- *   - Only syncs persistent workspace data, never ephemeral state
- *   - Uses chrome.alarms — survives MV3 service worker sleep
- *   - Extension never depends on this succeeding
- *   - Triggers on workspace changes AND on login (syncJwt written)
  */
 
 const API_URL = 'https://flowstate-backend.vercel.app/api/sync';
 const ALARM_NAME = 'flowstate-sync';
-
 const SYNC_KEYS = ['workspaces', 'syncJwt'];
 
 export function initSyncListener() {
@@ -18,32 +11,24 @@ export function initSyncListener() {
         if (area !== 'local') return;
         const hasRelevantChange = Object.keys(changes).some(k => SYNC_KEYS.includes(k));
         if (!hasRelevantChange) return;
-        if (changes.syncJwt && !changes.syncJwt.newValue) return; // logout — skip
+        if (changes.syncJwt && !changes.syncJwt.newValue) return;
         chrome.alarms.create(ALARM_NAME, { delayInMinutes: 0.05 });
-        console.log('[FlowState Sync] Sync scheduled (trigger:', Object.keys(changes).join(', '), ')');
+        console.log('[FlowState Sync] Scheduled (trigger:', Object.keys(changes).join(', '), ')');
     });
 
     chrome.alarms.onAlarm.addListener((alarm) => {
         if (alarm.name !== ALARM_NAME) return;
-        console.log('[FlowState Sync] Alarm fired — syncing…');
         syncToBackend();
     });
 }
 
 async function syncToBackend() {
     let data;
-    try {
-        data = await chrome.storage.local.get(['syncJwt', 'workspaces']);
-    } catch (err) {
-        console.error('[FlowState Sync] Storage read failed:', err.message);
-        return;
-    }
+    try { data = await chrome.storage.local.get(['syncJwt', 'workspaces']); }
+    catch (err) { console.error('[FlowState Sync] Storage read failed:', err.message); return; }
 
-    if (!data.syncJwt) { console.log('[FlowState Sync] Not authenticated — skipping'); return; }
-    if (!data.workspaces || Object.keys(data.workspaces).length === 0) {
-        console.log('[FlowState Sync] No workspaces — skipping');
-        return;
-    }
+    if (!data.syncJwt) { console.log('[FlowState Sync] Not authenticated'); return; }
+    if (!data.workspaces || Object.keys(data.workspaces).length === 0) return;
 
     const workspaces = Object.values(data.workspaces).map(ws => ({
         id: ws.id,
@@ -53,6 +38,7 @@ async function syncToBackend() {
         allowedDomains: ws.allowedDomains || [],
         blockedGroupNames: ws.blockedGroupNames || [],
         blockedGroupDomains: ws.blockedGroupDomains || {},
+        allowedGroupNames: ws.allowedGroupNames || [],
         todos: ws.todos || [],
         savedTabsCount: (ws.savedTabs || []).length,
     }));
@@ -62,19 +48,13 @@ async function syncToBackend() {
     try {
         const res = await fetch(API_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${data.syncJwt}`,
-            },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${data.syncJwt}` },
             body: JSON.stringify({ workspaces }),
             signal: AbortSignal.timeout(8000),
         });
         const result = await res.json().catch(() => ({}));
-        if (res.ok) {
-            console.log('[FlowState Sync] ✓ Success. syncedAt:', result.syncedAt);
-        } else {
-            console.warn('[FlowState Sync] ✗ Failed. Status:', res.status, result.error);
-        }
+        if (res.ok) console.log('[FlowState Sync] ✓ Success. syncedAt:', result.syncedAt);
+        else console.warn('[FlowState Sync] ✗ Failed:', res.status, result.error);
     } catch (err) {
         console.warn('[FlowState Sync] ✗ Network error:', err.message);
     }
