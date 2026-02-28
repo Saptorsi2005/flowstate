@@ -1,16 +1,7 @@
 /**
  * api/auth/device-poll.js — POST /api/auth/device-poll
  *
- * Extension polls this endpoint every `interval` seconds (from device-start response)
- * to check if the user has completed login on the verification page.
- *
- * Responses:
- *   { status: 'pending' }                   — User hasn't approved yet
- *   { status: 'approved', accessToken: ... } — User approved, JWT ready
- *   { status: 'expired' }                   — device_code timed out
- *   { status: 'error', error: ... }         — Something went wrong
- *
- * The extension stores the accessToken in chrome.storage.local as `syncJwt`.
+ * Polls for Device Code Flow completion.
  */
 
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
@@ -22,21 +13,29 @@ const CORS_HEADERS = {
     'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+function setCors(res) {
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+}
+
 export default async function handler(req, res) {
+    setCors(res);
+
     if (req.method === 'OPTIONS') {
-        return res.status(204).set(CORS_HEADERS).end();
+        res.status(204).end();
+        return;
     }
 
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        res.status(405).json({ error: 'Method not allowed' });
+        return;
     }
 
-    const { deviceCode } = typeof req.body === 'string'
-        ? JSON.parse(req.body)
-        : req.body;
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { deviceCode } = body ?? {};
 
     if (!deviceCode) {
-        return res.status(400).set(CORS_HEADERS).json({ error: 'deviceCode is required' });
+        res.status(400).json({ error: 'deviceCode is required' });
+        return;
     }
 
     try {
@@ -52,37 +51,32 @@ export default async function handler(req, res) {
 
         const data = await auth0Res.json();
 
-        // Still waiting for user to approve
-        if (data.error === 'authorization_pending') {
-            return res.status(200).set(CORS_HEADERS).json({ status: 'pending' });
+        if (data.error === 'authorization_pending' || data.error === 'slow_down') {
+            res.status(200).json({ status: 'pending' });
+            return;
         }
 
-        // Polling too fast (extension should use interval from device-start)
-        if (data.error === 'slow_down') {
-            return res.status(200).set(CORS_HEADERS).json({ status: 'pending' });
-        }
-
-        // Device code expired — user took too long
         if (data.error === 'expired_token') {
-            return res.status(200).set(CORS_HEADERS).json({ status: 'expired' });
+            res.status(200).json({ status: 'expired' });
+            return;
         }
 
-        // User denied access
         if (data.error === 'access_denied') {
-            return res.status(200).set(CORS_HEADERS).json({ status: 'denied' });
+            res.status(200).json({ status: 'denied' });
+            return;
         }
 
-        // Any other Auth0 error
         if (data.error) {
             console.error('[device-poll] Auth0 error:', data);
-            return res.status(200).set(CORS_HEADERS).json({
+            res.status(200).json({
                 status: 'error',
                 error: data.error_description || data.error,
             });
+            return;
         }
 
-        // ✅ Approved — return the access token
-        return res.status(200).set(CORS_HEADERS).json({
+        // Approved
+        res.status(200).json({
             status: 'approved',
             accessToken: data.access_token,
             expiresIn: data.expires_in,
@@ -90,6 +84,6 @@ export default async function handler(req, res) {
 
     } catch (err) {
         console.error('[device-poll] Error:', err);
-        return res.status(500).set(CORS_HEADERS).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 }

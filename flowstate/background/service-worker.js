@@ -706,3 +706,80 @@ async function handleUnlock(domain, tabId) {
 }
 
 initSyncListener();
+
+// ── Auth0 Device Code Flow polling (lives in SW so popup close is safe) ─────
+// Popup sends FS_START_DEVICE_POLL → SW stores deviceCode + schedules alarms
+// On each alarm: one poll attempt → store syncJwt on approval → popup onChanged fires
+
+const _AUTH_ALARM = 'flowstate-auth-poll';
+const _AUTH_API = 'https://flowstate-backend.vercel.app';
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'FS_START_DEVICE_POLL') {
+    const interval = Math.max(msg.interval ?? 5, 5);
+    chrome.storage.local
+      .set({ _pendingDeviceCode: msg.deviceCode, _pollIntervalSecs: interval })
+      .then(() => {
+        chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: interval / 60 });
+        sendResponse({ ok: true });
+      });
+    return true;
+  }
+
+  if (msg.type === 'FS_CANCEL_DEVICE_POLL') {
+    chrome.alarms.clear(_AUTH_ALARM);
+    chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+    sendResponse({ ok: true });
+    return true;
+  }
+});
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== _AUTH_ALARM) return;
+
+  const { _pendingDeviceCode, _pollIntervalSecs } =
+    await chrome.storage.local.get(['_pendingDeviceCode', '_pollIntervalSecs']);
+  if (!_pendingDeviceCode) return;
+
+  const intervalSecs = _pollIntervalSecs ?? 5;
+
+  try {
+    const res = await fetch(`${_AUTH_API}/api/auth/device-poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceCode: _pendingDeviceCode }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await res.json();
+    console.log('[FlowState SW Auth] poll:', data.status);
+
+    if (data.status === 'approved' && data.accessToken) {
+      // Store JWT — popup's storage.onChanged listener will update UI
+      await chrome.storage.local.set({ syncJwt: data.accessToken });
+
+      // Decode and store user info for display in popup
+      try {
+        const [, payload] = data.accessToken.split('.');
+        const user = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+        await chrome.storage.local.set({
+          syncUser: { email: user.email || null, name: user.name || user.email || 'User', sub: user.sub || null }
+        });
+      } catch { /* decode failed — JWT still stored, email just won't show */ }
+
+      await chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+      return; // done
+    }
+
+    if (data.status === 'expired' || data.status === 'denied' || data.status === 'error') {
+      await chrome.storage.local.remove(['_pendingDeviceCode', '_pollIntervalSecs']);
+      return; // done (failed)
+    }
+
+    // Still pending — reschedule
+    chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: intervalSecs / 60 });
+
+  } catch (err) {
+    console.warn('[FlowState SW Auth] poll error:', err.message);
+    chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: intervalSecs / 60 });
+  }
+});

@@ -18,14 +18,22 @@ const CORS_HEADERS = {
     'Access-Control-Allow-Headers': 'Authorization',
 };
 
+function setCors(res) {
+    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+}
+
 export default async function handler(req, res) {
+    setCors(res);
+
     // ── CORS preflight ────────────────────────────────────────────
     if (req.method === 'OPTIONS') {
-        return res.status(204).set(CORS_HEADERS).end();
+        res.status(204).end();
+        return;
     }
 
     if (req.method !== 'GET') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        res.status(405).json({ error: 'Method not allowed' });
+        return;
     }
 
     // ── Auth ──────────────────────────────────────────────────────
@@ -34,20 +42,18 @@ export default async function handler(req, res) {
         identity = await verifyRequest(req);
     } catch (err) {
         const status = err instanceof AuthError ? err.status : 401;
-        res.status(status);
-        Object.entries(CORS_HEADERS).forEach(([key, value]) => {
-            res.setHeader(key, value);
-        });
-        return res.json({ error: err.message });
+        res.status(status).json({ error: err.message });
+        return;
     }
 
     // ── Rate limit: 60 reads/minute ───────────────────────────────
     const rl = checkRateLimit(rateLimitKey(identity.sub, 'dashboard'), 60, 60_000);
     if (!rl.allowed) {
-        return res.status(429).set(CORS_HEADERS).json({
+        res.status(429).json({
             error: 'Rate limit exceeded',
             resetMs: rl.resetMs,
         });
+        return;
     }
 
     try {
@@ -59,7 +65,7 @@ export default async function handler(req, res) {
         // Fetch all dashboard data in parallel queries
         const data = await getDashboardData(sql, user.id);
 
-        return res.status(200).set(CORS_HEADERS).json({
+        res.status(200).json({
             user: {
                 email: user.email,
                 createdAt: user.created_at,
@@ -74,6 +80,6 @@ export default async function handler(req, res) {
 
     } catch (err) {
         console.error('[FlowState /api/dashboard] DB error:', err);
-        return res.status(500).set(CORS_HEADERS).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 }
