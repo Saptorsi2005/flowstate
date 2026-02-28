@@ -2,7 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 
 const navItems = [
     {
-        path: "/",
+        path: "/home",
         label: "Dashboard",
         icon: (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -33,21 +33,20 @@ export default function Sidebar() {
             {/* Brand */}
             <div style={styles.brand}>
                 <div style={styles.brandIcon}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#brandGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <defs>
-                            <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stopColor="#22d3ee" />
-                                <stop offset="100%" stopColor="#6366f1" />
-                            </linearGradient>
-                        </defs>
-                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                        <path d="M2 17l10 5 10-5" />
-                        <path d="M2 12l10 5 10-5" />
-                    </svg>
+                    <img
+                        src="/flowstate-logo.png"
+                        alt="FlowState Logo"
+                        style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 8,
+                            objectFit: "cover",
+                        }}
+                    />
                 </div>
                 <div>
                     <h1 style={styles.brandTitle}>FlowState</h1>
-                    <span style={styles.brandSub}>Tab Manager</span>
+                    <span style={styles.brandSub}>AI Tab Manager</span>
                 </div>
             </div>
 
