@@ -411,7 +411,7 @@ async function renderHeatmap() {
     const { syncJwt } = await chrome.storage.local.get('syncJwt');
     console.log('[FlowState Heatmap] syncJwt present:', !!syncJwt);
     if (syncJwt) {
-      const res = await fetch('https://flowstate-backend.vercel.app/api/heatmap', {
+      const res = await fetch('https://flowstate-backend.vercel.app/api/focus-heatmap', {
         headers: { 'Authorization': `Bearer ${syncJwt}` },
         signal: AbortSignal.timeout(5000)
       });
