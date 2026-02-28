@@ -146,6 +146,137 @@ function isYouTubeSafePath(url) {
 // Per-tab doomscroll escalation levels (in-memory, resets on tab close)
 const _doomScrollLevels = new Map(); // tabId → { level, lastTrigger }
 
+// ── Productivity Safe Domains — Permanent Allowlist ───────────────────
+// Sites that must NEVER be blocked regardless of workspace rules,
+// manual blocked list, AI classifier, or focus mode.
+// Subdomain matching is automatic: listing 'github.com' also allows
+// docs.github.com, api.github.com, etc.
+const PRODUCTIVITY_SAFE_DOMAINS = new Set([
+
+  // ─ AI Assistants ──────────────────────────────────────────
+  'chatgpt.com', 'openai.com',
+  'claude.ai', 'anthropic.com',
+  'gemini.google.com', 'aistudio.google.com', 'ai.google.dev',
+  'copilot.microsoft.com',
+  'perplexity.ai',
+  'mistral.ai', 'huggingface.co',
+  'cohere.com', 'poe.com', 'phind.com',
+  'you.com', 'groq.com', 'replicate.com',
+  'x.ai',                        // Grok / xAI
+  'together.ai',                 // Together AI
+  'anyscale.com',                // Anyscale endpoints
+  'fireworks.ai',                // Fireworks AI
+
+  // ─ Search Engines ───────────────────────────────────────
+  'google.com',                  // Google Search (also covers Maps, Translate, etc.)
+  'bing.com',
+  'duckduckgo.com',
+  'brave.com',
+  'startpage.com',
+  'ecosia.org',
+  'kagi.com',                    // Kagi premium search
+
+  // ─ Developer Tools ─────────────────────────────────────
+  'github.com', 'gitlab.com', 'bitbucket.org',
+  'stackoverflow.com', 'stackexchange.com', 'superuser.com', 'askubuntu.com',
+  'developer.mozilla.org',       // MDN
+  'devdocs.io',
+  'npmjs.com', 'pypi.org', 'pkg.go.dev',
+  'hub.docker.com', 'docker.com',
+  'codepen.io', 'codesandbox.io', 'stackblitz.com',
+  'replit.com', 'jsfiddle.net', 'jsbin.com',
+  'leetcode.com', 'hackerrank.com', 'codewars.com', 'codeforces.com',
+  'excalidraw.com',
+  'regex101.com',
+  'jsonformatter.curiousconcept.com',
+
+  // ─ Cloud & DevOps ─────────────────────────────────────
+  'vercel.com', 'netlify.com', 'render.com', 'heroku.com',
+  'railway.app', 'fly.io',
+  'cloudflare.com',
+  'aws.amazon.com', 'console.aws.amazon.com',
+  'azure.microsoft.com', 'portal.azure.com',
+  'console.cloud.google.com', 'cloud.google.com',
+  'supabase.com', 'firebase.google.com',
+  'planetscale.com', 'neon.tech', 'turso.tech',
+  'postman.com', 'insomnia.rest',
+  'sentry.io', 'datadog.com', 'grafana.com',
+
+  // ─ Productivity & Project Management ────────────────
+  'notion.so', 'notion.com',
+  'trello.com',
+  'asana.com',
+  'linear.app',
+  'atlassian.com',               // Jira, Confluence
+  'monday.com',
+  'clickup.com',
+  'airtable.com',
+  'todoist.com',
+  'things.app',
+  'obsidian.md',
+  'roamresearch.com',
+  'workflowy.com',
+
+  // ─ Communication & Collaboration ──────────────────
+  'slack.com',
+  'zoom.us',
+  'teams.microsoft.com',
+  'meet.google.com',
+  'discord.com',                 // Used heavily by developer communities
+  'loom.com',
+  'miro.com',
+  'figma.com',
+
+  // ─ Email & Calendar ─────────────────────────────────
+  'mail.google.com',
+  'calendar.google.com',
+  'outlook.live.com', 'outlook.office.com',
+
+  // ─ File Storage & Docs ────────────────────────────
+  'drive.google.com', 'docs.google.com',
+  'sheets.google.com', 'slides.google.com',
+  'dropbox.com',
+  'onedrive.live.com',
+  'sharepoint.com',
+
+  // ─ Learning & Documentation ────────────────────────
+  'coursera.org',
+  'edx.org',
+  'khanacademy.org',
+  'udemy.com',
+  'freecodecamp.org',
+  'w3schools.com',
+  'geeksforgeeks.org',
+  'tutorialspoint.com',
+  'medium.com',
+  'dev.to',
+  'hashnode.com',
+  'css-tricks.com',
+  'smashingmagazine.com',
+  'web.dev',
+  'roadmap.sh',
+]);
+
+/**
+ * Returns true if the URL belongs to a productivity/work tool that must
+ * never be blocked, even if the user manually adds it to their blocked list.
+ *
+ * Matching rules (hostname after stripping www.):
+ *  1. Exact match: 'github.com' matches 'github.com'
+ *  2. Subdomain match: 'github.com' also matches 'docs.github.com'
+ */
+function isProductivityDomain(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    if (PRODUCTIVITY_SAFE_DOMAINS.has(hostname)) return true;
+    // Subdomain match: docs.github.com ends with .github.com
+    for (const safe of PRODUCTIVITY_SAFE_DOMAINS) {
+      if (hostname.endsWith('.' + safe)) return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
 // ── Extension Reload/Install Handler ───────────────────────────
 // Reset workspace state when extension reloads/installs
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -525,6 +656,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   console.log('[FlowState] Checking:', domain, 'against workspace:', ws.name);
 
+  // ── ABSOLUTE PRIORITY: Productivity safe list ──
+  // Work tools, AI assistants, dev tools, learning sites etc.
+  // Cannot be blocked by any workspace rule, manual list, or AI classifier.
+  if (isProductivityDomain(url)) {
+    console.log('[FlowState] Productivity site — permanently allowed:', domain);
+    return;
+  }
+
   // Temp-unlocked domains (tab-specific, from intent unlock)
   const unlocked = data.tempUnlockedDomains || [];
   if (unlocked.some(u => u.tabId === tabId && domain.includes(u.domain))) return;
@@ -654,6 +793,12 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     if (!domain) return;
 
     console.log('[FlowState onActivated] Tab activated:', domain, 'Blocked list:', ws.blockedDomains);
+
+    // ── ABSOLUTE PRIORITY: Productivity safe list ──
+    if (isProductivityDomain(url)) {
+      console.log('[FlowState] Productivity site (activated tab) — permanently allowed:', domain);
+      return;
+    }
 
     // Temp-unlocked domains (tab-specific, from intent unlock)
     const unlocked = data.tempUnlockedDomains || [];
