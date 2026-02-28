@@ -261,7 +261,7 @@ function groupTabsByCategory(tabs) {
 /** Create a colored, titled tab group for each category. */
 async function createTabGroups(categoryMap) {
   let fallbackIdx = 0;
-  
+
   // Get all groups in the current window to check for existing categories
   const existingGroups = await chrome.tabGroups.query({ windowId: chrome.windows.WINDOW_ID_CURRENT });
 
@@ -270,7 +270,7 @@ async function createTabGroups(categoryMap) {
     const tabIds = tabs.map(t => t.id);
 
     // Look for any existing groups with this name (case-insensitive)
-    const matchingGroups = existingGroups.filter(g => 
+    const matchingGroups = existingGroups.filter(g =>
       g.title && g.title.trim().toLowerCase() === category.toLowerCase()
     );
 
@@ -279,7 +279,7 @@ async function createTabGroups(categoryMap) {
     if (matchingGroups.length > 0) {
       // Use the first existing group as the primary one
       targetGroupId = matchingGroups[0].id;
-      
+
       // Move the new tabs into this existing group
       await chrome.tabs.group({ tabIds, groupId: targetGroupId });
 
@@ -297,7 +297,7 @@ async function createTabGroups(categoryMap) {
       // No existing group found, create a new one
       targetGroupId = await chrome.tabs.group({ tabIds });
       const color = CATEGORY_COLORS[category] || FALLBACK_COLORS[fallbackIdx++ % FALLBACK_COLORS.length];
-      
+
       await chrome.tabGroups.update(targetGroupId, {
         title: category,
         color: color,
@@ -443,6 +443,7 @@ async function selectWorkspace(id) {
   // Domain lists
   renderDomainList($blockedList, ws.blockedDomains, 'blocked');
   renderDomainList($allowedList, ws.allowedDomains, 'allowed');
+  renderGroupBlockList(ws.blockedGroupNames || []);
 
   // Saved tabs count
   $savedTabsCount.textContent = ws.savedTabs.length;
@@ -511,6 +512,84 @@ function renderDomainList(container, domains, type) {
     });
   });
 }
+
+// ── Group Block List (renders blocked group names as chips) ─────
+const $groupBlockList = document.getElementById('group-block-list');
+const $groupBlockInput = document.getElementById('group-block-input');
+const $btnAddGroupBlock = document.getElementById('btn-add-group-block');
+
+function renderGroupBlockList(names) {
+  $groupBlockList.innerHTML = '';
+  if (!names || names.length === 0) {
+    $groupBlockList.innerHTML = '<span class="empty-domains">None</span>';
+    return;
+  }
+  for (const name of names) {
+    const chip = document.createElement('span');
+    chip.className = 'domain-chip';
+    chip.innerHTML = `${esc(name)} <span class="group-remove" data-name="${esc(name)}">×</span>`;
+    $groupBlockList.appendChild(chip);
+  }
+  $groupBlockList.querySelectorAll('.group-remove').forEach(el => {
+    el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const ws = await getWorkspace(selectedWsId);
+      if (!ws) return;
+      const removedName = el.dataset.name;
+
+      // 1. Remove group from workspace
+      ws.blockedGroupNames = (ws.blockedGroupNames || []).filter(n => n !== removedName);
+      // 2. Clear pre-resolved domains so blocking check stops immediately
+      if (ws.blockedGroupDomains) delete ws.blockedGroupDomains[removedName];
+      await saveWorkspace(ws);
+
+      // 3. Restore any tabs currently stuck on a block page that belong to this group
+      //    Block pages store the original URL in their ?url= query param.
+      try {
+        const BLOCK_PAGES = ['blocked.html', 'soft-redirect.html', 'ai-escalation.html'];
+        const allTabs = await chrome.tabs.query({});
+        for (const tab of allTabs) {
+          if (!tab.url) continue;
+          const isBlockPage = BLOCK_PAGES.some(p => tab.url.includes(p));
+          if (!isBlockPage) continue;
+          // Check if this tab is in the group we just unblocked
+          if (tab.groupId && tab.groupId !== -1) {
+            try {
+              const group = await chrome.tabGroups.get(tab.groupId);
+              if (group?.title?.trim().toLowerCase() === removedName.toLowerCase()) {
+                const originalUrl = new URL(tab.url).searchParams.get('url');
+                if (originalUrl) {
+                  await chrome.tabs.update(tab.id, { url: decodeURIComponent(originalUrl) });
+                }
+              }
+            } catch { /* group may have been deleted */ }
+          }
+        }
+      } catch { /* tab restore is best-effort */ }
+
+      await selectWorkspace(selectedWsId);
+    });
+  });
+}
+
+$btnAddGroupBlock.addEventListener('click', async () => {
+  const raw = $groupBlockInput.value.trim();
+  if (!raw) return;
+  const ws = await getWorkspace(selectedWsId);
+  if (!ws) return;
+  if (!ws.blockedGroupNames) ws.blockedGroupNames = [];
+  if (!ws.blockedGroupNames.includes(raw)) {
+    ws.blockedGroupNames.push(raw);
+    await saveWorkspace(ws);
+    await selectWorkspace(selectedWsId);
+  }
+  $groupBlockInput.value = '';
+});
+
+$groupBlockInput.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  $btnAddGroupBlock.click();
+});
 
 // ── Todo Rendering ─────────────────────────────────────────────
 function renderTodos(ws) {

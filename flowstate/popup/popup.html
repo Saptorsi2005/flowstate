@@ -88,6 +88,19 @@
         </div>
       </div>
 
+      <!-- Block Tab Group -->
+      <div class="detail-group">
+        <label class="detail-label">Block Tab Group</label>
+        <div id="group-block-list" class="domain-list"></div>
+        <div class="domain-add">
+          <input id="group-block-input" placeholder="e.g. Social Media" />
+          <button id="btn-add-group-block">+</button>
+        </div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:4px">
+          Blocks all tabs in a Chrome tab group by name at activation.
+        </p>
+      </div>
+
       <!-- Saved Tabs -->
       <div class="detail-group">
         <label class="detail-label">Saved Tabs: <span id="saved-tabs-count">0</span></label>
@@ -178,10 +191,10 @@
           <div id="account-step-code" class="hidden">
             <p class="detail-label" style="margin-top:8px">Visit this URL and enter the code:</p>
             <a id="account-verify-link" href="#" target="_blank"
-               style="display:block;font-size:12px;color:var(--primary);margin:4px 0;word-break:break-all"></a>
+              style="display:block;font-size:12px;color:var(--primary);margin:4px 0;word-break:break-all"></a>
             <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
               <span id="account-user-code"
-                    style="font-size:22px;font-weight:700;letter-spacing:4px;color:var(--primary);font-family:monospace"></span>
+                style="font-size:22px;font-weight:700;letter-spacing:4px;color:var(--primary);font-family:monospace"></span>
               <button id="btn-copy-code" class="btn-sm" title="Copy code">⎘</button>
             </div>
             <p id="account-poll-status" style="font-size:12px;color:var(--text-muted);margin-top:6px">

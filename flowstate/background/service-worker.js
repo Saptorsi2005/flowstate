@@ -351,6 +351,67 @@ function isDomainInList(domain, domainList) {
   });
 }
 
+/**
+ * Live check: is this tabId inside a Chrome tab group whose title
+ * matches one of ws.blockedGroupNames? Works even if the group was
+ * created AFTER workspace activation. Returns true if blocked.
+ */
+async function isTabInBlockedGroup(tabId, ws) {
+  if (!ws?.blockedGroupNames?.length) return false;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.groupId || tab.groupId === -1) return false; // tab is not in any group
+    const group = await chrome.tabGroups.get(tab.groupId);
+    if (!group?.title) return false;
+    return ws.blockedGroupNames.some(
+      name => name.toLowerCase() === group.title.trim().toLowerCase()
+    );
+  } catch {
+    return false; // tab no longer exists or groups API unavailable
+  }
+}
+
+
+// ── Tab Group Blocking Helpers ────────────────────────────────
+
+/**
+ * Returns a flat array of all domains pre-resolved from blocked tab groups.
+ * Reads ws.blockedGroupDomains (populated at activation time by resolveGroupDomains).
+ * Synchronous and zero-cost — safe to call in hot blocking paths.
+ */
+function getGroupBlockedDomains(ws) {
+  if (!ws?.blockedGroupDomains) return [];
+  return Object.values(ws.blockedGroupDomains).flat();
+}
+
+/**
+ * Resolves ws.blockedGroupNames → actual tab hostnames using chrome.tabGroups.
+ * Called once when a workspace activates. Stores result back into storage.
+ * Never called from blocking hot path — async is fine here.
+ */
+async function resolveGroupDomains(ws) {
+  if (!ws?.blockedGroupNames?.length) return {};
+  const resolved = {};
+  try {
+    const groups = await chrome.tabGroups.query({});
+    for (const groupName of ws.blockedGroupNames) {
+      const match = groups.find(
+        g => g.title && g.title.trim().toLowerCase() === groupName.toLowerCase()
+      );
+      if (!match) continue;
+      const tabs = await chrome.tabs.query({ groupId: match.id });
+      const domains = tabs
+        .map(t => { try { return new URL(t.url).hostname.replace(/^www\./, ''); } catch { return null; } })
+        .filter(Boolean);
+      if (domains.length) resolved[groupName] = domains;
+    }
+  } catch (err) {
+    console.warn('[FlowState] resolveGroupDomains error:', err.message);
+  }
+  return resolved;
+}
+
+
 async function callBartMNLI(text, candidateLabels, apiKey) {
   const res = await fetch(HF_API_URL, {
     method: 'POST',
@@ -461,8 +522,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return;
   }
 
-  // ── 1. Manual blocklist check ──
-  const manuallyBlocked = isDomainInList(domain, ws.blockedDomains);
+  // ── 1. Manual + group blocklist check (nav listener) ──
+  // Also live-checks the tab’s actual Chrome tab group by name.
+  const effectiveBlocked1 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+  const manuallyBlocked = isDomainInList(domain, effectiveBlocked1)
+    || await isTabInBlockedGroup(tabId, ws);
 
   if (manuallyBlocked) {
     console.log('[FlowState] Blocking (manual):', domain);
@@ -576,8 +640,11 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       return;
     }
 
-    // ── 1. Manual blocklist check ──
-    const manuallyBlocked = isDomainInList(domain, ws.blockedDomains);
+    // ── 1. Manual + group blocklist check (activation listener) ──
+    // Also live-checks the tab’s actual Chrome tab group by name.
+    const effectiveBlocked2 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+    const manuallyBlocked = isDomainInList(domain, effectiveBlocked2)
+      || await isTabInBlockedGroup(activeInfo.tabId, ws);
 
     if (manuallyBlocked) {
       console.log('[FlowState] Blocking activated tab (manual):', domain);
@@ -960,6 +1027,22 @@ async function activateWorkspace(id) {
 
     // Don't check or block tabs immediately on activation - let tabs.onUpdated handle it naturally
     // This prevents infinite loops and double-blocking
+
+    // ── Resolve tab group domains at activation time ──────────────
+    // Reads chrome.tabGroups, matches blocked group names, extracts hostnames.
+    // Stored back into the workspace so blocking checks read it synchronously.
+    if (ws.blockedGroupNames?.length) {
+      try {
+        const resolvedGroupDomains = await resolveGroupDomains(ws);
+        ws.blockedGroupDomains = resolvedGroupDomains;
+        const updatedWorkspaces = (await chrome.storage.local.get('workspaces')).workspaces || {};
+        updatedWorkspaces[id] = ws;
+        await chrome.storage.local.set({ workspaces: updatedWorkspaces });
+        console.log('[FlowState] Group domains resolved:', resolvedGroupDomains);
+      } catch (err) {
+        console.warn('[FlowState] Group domain resolution failed:', err.message);
+      }
+    }
 
     return { success: true };
   } catch (err) {
