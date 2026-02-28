@@ -1156,6 +1156,91 @@ section:hover {
   box-shadow: 0 0 16px rgba(52, 211, 153, 0.15);
 }
 
+/* ── Activity Heatmap ──────────────────────────────────── */
+.heatmap-section {
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.heatmap-container {
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 4px 0px;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.heatmap-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  /* 0: empty state */
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.heatmap-cell[data-level="1"] {
+  background: rgba(34, 211, 238, 0.35);
+  /* Increased from 0.2 */
+  box-shadow: 0 0 2px rgba(34, 211, 238, 0.1);
+}
+
+.heatmap-cell[data-level="2"] {
+  background: rgba(34, 211, 238, 0.55);
+  /* Increased from 0.4 */
+  box-shadow: 0 0 4px rgba(34, 211, 238, 0.2);
+}
+
+.heatmap-cell[data-level="3"] {
+  background: rgba(34, 211, 238, 0.8);
+  /* Increased from 0.7 */
+  box-shadow: 0 0 6px rgba(34, 211, 238, 0.3);
+}
+
+.heatmap-cell[data-level="4"] {
+  background: rgba(34, 211, 238, 1);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.4);
+}
+
+.heatmap-cell:hover {
+  outline: 1px solid rgba(255, 255, 255, 0.4);
+  transform: scale(1.15);
+}
+
+.heatmap-tooltip {
+  position: absolute;
+  background: rgba(15, 15, 20, 0.95);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -100%) translateY(-6px);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+}
+
+.heatmap-tooltip.visible {
+  opacity: 1;
+  transform: translate(-50%, -100%) translateY(-2px);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    POMODORO PANEL
    ══════════════════════════════════════════════════════════════ */
@@ -1244,9 +1329,17 @@ section:hover {
   transition: color 0.4s ease;
 }
 
-.pom-phase-label--work  { color: var(--accent-cyan); }
-.pom-phase-label--break { color: var(--accent-emerald); }
-.pom-phase-label--paused { color: var(--accent-amber); }
+.pom-phase-label--work {
+  color: var(--accent-cyan);
+}
+
+.pom-phase-label--break {
+  color: var(--accent-emerald);
+}
+
+.pom-phase-label--paused {
+  color: var(--accent-amber);
+}
 
 .pom-session {
   font-size: 11px;
@@ -1269,7 +1362,8 @@ section:hover {
 #pom-ring {
   width: 100%;
   height: 100%;
-  transform: rotate(-90deg); /* start arc at top */
+  transform: rotate(-90deg);
+  /* start arc at top */
 }
 
 .pom-track {
@@ -1287,8 +1381,13 @@ section:hover {
   /* stroke-dasharray set to 2πr = 2 × π × 42 ≈ 263.9 (set in HTML) */
 }
 
-.pom-arc--break { stroke: var(--accent-emerald); }
-.pom-arc--paused { stroke: var(--accent-amber); }
+.pom-arc--break {
+  stroke: var(--accent-emerald);
+}
+
+.pom-arc--paused {
+  stroke: var(--accent-amber);
+}
 
 /* Text centred in ring */
 .pom-center {

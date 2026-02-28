@@ -352,12 +352,12 @@ const $btnActivate = document.getElementById('btn-activate');
   try {
     await renderWorkspaces();
     await populateGroupSelect();
+    await renderHeatmap();
     await syncActiveState();
     startTimerPolling();
   } catch (e) { console.error('FlowState init error:', e); }
   bindNewEvents();
 })();
-
 // ── Workspace List ─────────────────────────────────────────────
 async function renderWorkspaces() {
   const wss = await getWorkspaces();
@@ -397,7 +397,106 @@ async function renderWorkspaces() {
   }
 }
 
-// ── Select & Detail ────────────────────────────────────────────
+// ── Activity Heatmap ───────────────────────────────────────────
+const $heatmapContainer = document.getElementById('heatmap-container');
+const $heatmapTooltip = document.getElementById('heatmap-tooltip');
+
+async function renderHeatmap() {
+  if (!$heatmapContainer || !$heatmapTooltip) return;
+  $heatmapContainer.innerHTML = '';
+
+  let sessions = [];
+  
+  try {
+    const { syncJwt } = await chrome.storage.local.get('syncJwt');
+    console.log('[FlowState Heatmap] syncJwt present:', !!syncJwt);
+    if (syncJwt) {
+      const res = await fetch('https://flowstate-backend.vercel.app/api/heatmap-sessions', {
+        headers: { 'Authorization': `Bearer ${syncJwt}` },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        sessions = data.sessions || [];
+        console.log(`[FlowState Heatmap] Fetched ${sessions.length} sessions`);
+      } else {
+        console.warn('[FlowState Heatmap] API error:', res.status);
+      }
+    }
+  } catch (err) {
+    console.warn('[FlowState Heatmap] Catch error:', err.message);
+  }
+
+  // We want to fill a grid of 154 cells (approx 22 weeks * 7 days)
+  const maxCells = 154;
+  
+  // Create grid cells (latest sessions first, but we render them to fill the grid)
+  for (let i = 0; i < maxCells; i++) {
+    // Fill the grid bottom-right to top-left with sessions[0...N]
+    // sessionIndex = (Total count of sessions we HAVE - 1) - (Relative index from end of grid)
+    // Actually, simpler: sessions[0] is newest. Cell 153 is newest.
+    // So for i = 153, sessionIndex = 0.
+    // For i = 152, sessionIndex = 1.
+    // index = (maxCells - 1) - i
+    const sessionIndex = (maxCells - 1) - i;
+    // sessionIndex will go from 153 down to 0 as i goes from 0 up to 153.
+    // sessions[0] is latest. sessions[sessions.length-1] is oldest.
+    // We want sessions[0] at the end (i=153), sessions[N] at (153-N).
+    const session = (sessionIndex >= 0 && sessionIndex < sessions.length) ? sessions[sessionIndex] : null;
+    
+    let level = 0;
+    let tooltipText = "No focus activity";
+
+    if (session) {
+      const score = session.score || 0;
+      console.log(`[FlowState Heatmap] Cell ${i} (idx ${sessionIndex}) -> Score: ${score}`);
+      if (score > 0) {
+        if (score < 30) level = 1;
+        else if (score < 60) level = 2;
+        else if (score < 85) level = 3;
+        else level = 4;
+      }
+
+      const date = new Date(session.started_at);
+      const displayDate = date.toLocaleDateString(undefined, { 
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+      });
+      const durationMins = session.duration_mins || 0;
+      
+      tooltipText = `Score: ${score} · ${durationMins} min · ${session.blocks || 0} blocks\n${displayDate}`;
+    }
+
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+    cell.dataset.level = level;
+
+    cell.addEventListener('mouseenter', (e) => {
+      // Setup tooltip text
+      $heatmapTooltip.textContent = tooltipText;
+      
+      // Calculate position relative to container
+      const wrapperRect = $heatmapContainer.parentElement.getBoundingClientRect();
+      const cellRect = cell.getBoundingClientRect();
+      
+      // We want to center it exactly above the cell
+      const left = cellRect.left - wrapperRect.left + (cellRect.width / 2);
+      const top = cellRect.top - wrapperRect.top;
+
+      $heatmapTooltip.style.left = `${left}px`;
+      $heatmapTooltip.style.top = `${top}px`;
+      $heatmapTooltip.classList.add('visible');
+    });
+
+    cell.addEventListener('mouseleave', () => {
+      $heatmapTooltip.classList.remove('visible');
+    });
+
+    $heatmapContainer.appendChild(cell);
+  }
+}
+
+
+// ── Todo Rendering ─────────────────────────────────────────────
 async function selectWorkspace(id) {
   selectedWsId = id;
   const ws = await getWorkspace(id);
@@ -529,13 +628,13 @@ let selectedGroupValue = '';
 async function populateGroupSelect() {
   if (!$groupBlockOptions) return;
   $groupBlockOptions.innerHTML = '<li class="placeholder-option">Select an open group...</li>';
-  
+
   try {
     const groups = await chrome.tabGroups.query({});
-    
+
     // Create a Set to ensure unique names if multiple groups have identical names
     const uniqueNames = new Set();
-    
+
     for (const g of groups) {
       if (g.title && g.title.trim()) {
         uniqueNames.add(g.title.trim());
@@ -548,7 +647,7 @@ async function populateGroupSelect() {
     } else {
       $groupBlockOptions.innerHTML = ''; // clear placeholder
     }
-    
+
     for (const title of uniqueNames) {
       const li = document.createElement('li');
       li.textContent = title;
@@ -656,7 +755,7 @@ $btnAddGroupBlock.addEventListener('click', async () => {
 
     await selectWorkspace(selectedWsId);
   }
-  
+
   // Reset the custom dropdown state after adding
   selectedGroupValue = '';
   $groupBlockDisplay.textContent = 'Select an open group...';
@@ -1330,6 +1429,7 @@ async function renderFocusScore() {
 
   const score = latestSession.focusScore ?? 0;
   const blocks = latestSession.blockedAttempts ?? 0;
+  const mins = latestSession.deepFocusMinutes ?? 0;
 
   // Color tier
   $focusScoreRing.className = 'focus-score-ring';
@@ -1342,7 +1442,8 @@ async function renderFocusScore() {
   const $title = document.querySelector('.focus-score-label');
   if ($title) $title.textContent = 'LAST SESSION SCORE';
 
-  $focusScoreSub.textContent = `${blocks} block${blocks !== 1 ? 's' : ''}`;
+  const minsText = mins > 0 ? `${mins} min` : '<1 min';
+  $focusScoreSub.textContent = `${minsText} · ${blocks} block${blocks !== 1 ? 's' : ''}`;
   $focusScoreStrip.classList.remove('hidden');
 }
 
@@ -1454,36 +1555,42 @@ function renderPomodoroUI(pom) {
       isBreak ? 'pom-arc--break' : ''
   );
 
-  // ── Pause / Resume / Start button ──
-  // Button is ALWAYS enabled — action depends on current state:
-  //   idle    → "▶ Start"   (sends pomodoro-start)
-  //   running → "⏸ Pause"  (sends pomodoro-pause)
-  //   paused  → "▶ Resume" (sends pomodoro-resume)
-  $btnPomPause.disabled = false;
-  if (isIdle) {
-    $btnPomPause.textContent = '▶ Start';
-    $btnPomPause.classList.add('pom-btn--resume');
-  } else if (isPaused) {
-    $btnPomPause.textContent = '▶ Resume';
-    $btnPomPause.classList.add('pom-btn--resume');
+  // ── Pause / Resume / Start button ──────────────────────────────
+  // BREAK IS NON-PAUSABLE: button is hidden during break phase.
+  // Two enforcement layers:
+  //   1. UI  — button hidden, no click possible
+  //   2. SW  — pausePomodoro() rejects phase==='break' at the source
+  if (isBreak) {
+    $btnPomPause.classList.add('hidden');
   } else {
-    $btnPomPause.textContent = '⏸ Pause';
-    $btnPomPause.classList.remove('pom-btn--resume');
+    $btnPomPause.classList.remove('hidden');
+    $btnPomPause.disabled = false;
+    if (isIdle) {
+      $btnPomPause.textContent = '▶ Start';
+      $btnPomPause.classList.add('pom-btn--resume');
+    } else if (isPaused) {
+      $btnPomPause.textContent = '▶ Resume';
+      $btnPomPause.classList.add('pom-btn--resume');
+    } else {
+      $btnPomPause.textContent = '⏸ Pause';
+      $btnPomPause.classList.remove('pom-btn--resume');
+    }
   }
 
-  // ── Status bar ──
-  if (isIdle) {
+  // ── Status bar ──────────────────────────────────────────────────
+  if (isBreak) {
+    $pomStatusBar.textContent = '🔒 Break Mode Active — runs its full duration';
+    $pomStatusBar.className = 'pom-status-bar pom-status-bar--break';
+  } else if (isIdle) {
     $pomStatusBar.textContent = '▶ Click Start to begin your first focus session';
     $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
-  } else if (isBreak && !isPaused) {
-    $pomStatusBar.textContent = '🎉 Break time — all sites unlocked';
-    $pomStatusBar.className = 'pom-status-bar pom-status-bar--break';
   } else if (isPaused) {
     $pomStatusBar.textContent = '⏸ Timer paused — blocking active';
     $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
   } else {
     $pomStatusBar.className = 'pom-status-bar hidden';
   }
+
 }
 
 /** Read Pomodoro state from storage and render. */
