@@ -146,6 +146,10 @@ function isYouTubeSafePath(url) {
 // Per-tab doomscroll escalation levels (in-memory, resets on tab close)
 const _doomScrollLevels = new Map(); // tabId → { level, lastTrigger }
 
+// Last safe (non-blocked) URL per tab — used by the "Take me somewhere safe" button.
+// Updated at every point where a URL is allowed through, NEVER on blocked paths.
+const _lastSafeUrl = new Map(); // tabId → url
+
 // ── Productivity Safe Domains — Permanent Allowlist ───────────────────
 // Sites that must NEVER be blocked regardless of workspace rules,
 // manual blocked list, AI classifier, or focus mode.
@@ -738,6 +742,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Cannot be blocked by any workspace rule, manual list, or AI classifier.
   if (isProductivityDomain(url)) {
     console.log('[FlowState] Productivity site — permanently allowed:', domain);
+    _lastSafeUrl.set(tabId, url);
     return;
   }
 
@@ -748,6 +753,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Allowed domains take priority over blocked
   if (isDomainInList(domain, ws.allowedDomains)) {
     console.log('[FlowState] Domain explicitly allowed:', domain);
+    _lastSafeUrl.set(tabId, url);
     return;
   }
 
@@ -787,6 +793,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // (homepage, watch, search, playlist, channel, @handle, feed).
   if (isYouTubeSafePath(url)) {
     console.log('[FlowState] YouTube safe route — explicitly allowed:', url);
+    _lastSafeUrl.set(tabId, url);
     return;
   }
 
@@ -815,12 +822,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       const cached = _aiCache.get(cacheKey);
       if (shouldAiBlock(cached.topLabel, cached.topScore, ws.focusMode)) {
         handleAiBlocking(tabId, url, domain, ws.focusMode, data);
+      } else {
+        _lastSafeUrl.set(tabId, url); // cached result = allowed
       }
       return;
     }
 
     // Run AI classification asynchronously (don't await inline — tab already loading)
     classifyAndMaybeBlock(tabId, url, domain, ws, data.hfApiKey, data);
+  } else {
+    // No AI — URL passed all checks, it's safe
+    _lastSafeUrl.set(tabId, url);
   }
 });
 
@@ -874,6 +886,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     // ── ABSOLUTE PRIORITY: Productivity safe list ──
     if (isProductivityDomain(url)) {
       console.log('[FlowState] Productivity site (activated tab) — permanently allowed:', domain);
+      _lastSafeUrl.set(activeInfo.tabId, url);
       return;
     }
 
@@ -884,6 +897,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     // Allowed domains take priority over blocked
     if (isDomainInList(domain, ws.allowedDomains)) {
       console.log('[FlowState] Domain allowed:', domain);
+      _lastSafeUrl.set(activeInfo.tabId, url);
       return;
     }
 
@@ -918,6 +932,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     // ── 1.5a. YouTube safe-path guard ──
     if (isYouTubeSafePath(url)) {
       console.log('[FlowState] YouTube safe route (activated tab) — explicitly allowed:', url);
+      _lastSafeUrl.set(activeInfo.tabId, url);
       return;
     }
 
@@ -946,12 +961,17 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         const cached = _aiCache.get(cacheKey);
         if (shouldAiBlock(cached.topLabel, cached.topScore, ws.focusMode)) {
           handleAiBlocking(activeInfo.tabId, url, domain, ws.focusMode, data);
+        } else {
+          _lastSafeUrl.set(activeInfo.tabId, url); // cached result = allowed
         }
         return;
       }
 
       // Run AI classification asynchronously
       classifyAndMaybeBlock(activeInfo.tabId, url, domain, ws, data.hfApiKey, data);
+    } else {
+      // No AI — URL passed all checks, it's safe
+      _lastSafeUrl.set(activeInfo.tabId, url);
     }
   } catch (err) {
     console.error('[FlowState] Error in onActivated:', err);
@@ -979,6 +999,7 @@ async function classifyAndMaybeBlock(tabId, url, domain, ws, apiKey, data) {
       handleAiBlocking(tabId, url, domain, ws.focusMode, data);
     } else {
       console.log('[FlowState AI] NOT blocking:', domain, '(score too low or wrong category)');
+      _lastSafeUrl.set(tabId, url);
     }
   } catch (err) {
     console.warn('[FlowState AI] Classification failed:', err.message);
@@ -1080,6 +1101,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   const countdowns = data.unlockCountdowns || {};
   delete countdowns[String(tabId)];
   _aiCache.delete(`${tabId}:*`); // best-effort cleanup
+  _lastSafeUrl.delete(tabId);    // clean up safe URL tracking
+  _doomScrollLevels.delete(tabId);
   await chrome.storage.local.set({
     tempUnlockedDomains: filtered,
     unlockCountdowns: countdowns
@@ -1102,6 +1125,10 @@ async function handleMessage(msg, sender) {
     case 'ai-score-intent': return handleAiScoreIntent(msg.reason);
     case 'doomscroll-trigger': return handleDoomScrollTrigger(msg, sender);
     case 'doomscroll-classify': return handleDoomScrollClassify(msg.title, msg.url, msg.urlType);
+    case 'get-last-safe-url': {
+      const safeUrl = _lastSafeUrl.get(msg.tabId) || null;
+      return { success: true, url: safeUrl };
+    }
     default: return { error: 'Unknown message type' };
   }
 }
