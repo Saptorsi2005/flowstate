@@ -565,6 +565,77 @@ async function resolveGroupDomains(ws) {
   return resolved;
 }
 
+// ── Tab Auto-Grouping ─────────────────────────────────────────────
+// When a workspace is active, every tab navigation is auto-placed
+// into the matching named Chrome tab group (Dev, Productivity, etc.).
+// Mirror of popup.js CATEGORY_MAP — kept in sync here manually.
+const TAB_CATEGORY_MAP = {
+  'amazon': 'Shopping', 'flipkart': 'Shopping', 'myntra': 'Shopping', 'ajio': 'Shopping',
+  'meesho': 'Shopping', 'snapdeal': 'Shopping', 'ebay': 'Shopping', 'walmart': 'Shopping',
+  'aliexpress': 'Shopping', 'etsy': 'Shopping', 'nykaa': 'Shopping',
+  'youtube': 'Entertainment', 'netflix': 'Entertainment', 'hotstar': 'Entertainment',
+  'primevideo': 'Entertainment', 'disneyplus': 'Entertainment', 'disney': 'Entertainment',
+  'jiocinema': 'Entertainment', 'twitch': 'Entertainment', 'crunchyroll': 'Entertainment', 'hulu': 'Entertainment',
+  'spotify': 'Music', 'music.youtube': 'Music', 'gaana': 'Music', 'jiosaavn': 'Music',
+  'soundcloud': 'Music', 'wynk': 'Music',
+  'facebook': 'Social', 'instagram': 'Social', 'twitter': 'Social', 'x.com': 'Social',
+  'linkedin': 'Social', 'reddit': 'Social', 'quora': 'Social', 'pinterest': 'Social',
+  'tumblr': 'Social', 'snapchat': 'Social', 'threads.net': 'Social',
+  'whatsapp': 'Messaging', 'telegram': 'Messaging', 'discord': 'Messaging',
+  'slack': 'Messaging', 'teams.microsoft': 'Messaging',
+  'github': 'Dev', 'gitlab': 'Dev', 'stackoverflow': 'Dev', 'codepen': 'Dev',
+  'replit': 'Dev', 'leetcode': 'Dev', 'hackerrank': 'Dev', 'codeforces': 'Dev',
+  'geeksforgeeks': 'Dev', 'npmjs': 'Dev',
+  'docs.google': 'Productivity', 'sheets.google': 'Productivity', 'slides.google': 'Productivity',
+  'drive.google': 'Productivity', 'notion': 'Productivity', 'trello': 'Productivity',
+  'asana': 'Productivity', 'figma': 'Productivity', 'canva': 'Productivity', 'miro': 'Productivity',
+  'mail.google': 'Email', 'outlook': 'Email', 'protonmail': 'Email',
+  'google.com': 'Search', 'bing.com': 'Search', 'duckduckgo': 'Search',
+  'chatgpt': 'Search', 'gemini.google': 'Search', 'perplexity': 'Search',
+  'bbc': 'News', 'cnn': 'News', 'ndtv': 'News', 'timesofindia': 'News', 'thehindu': 'News',
+  'coursera': 'Education', 'udemy': 'Education', 'khanacademy': 'Education',
+  'edx': 'Education', 'w3schools': 'Education',
+  'paytm': 'Finance', 'phonepe': 'Finance', 'razorpay': 'Finance',
+  'zerodha': 'Finance', 'groww': 'Finance',
+};
+
+const TAB_CATEGORY_COLORS = {
+  'Shopping': 'yellow', 'Entertainment': 'red', 'Music': 'pink', 'Social': 'blue',
+  'Messaging': 'purple', 'Dev': 'cyan', 'Productivity': 'green', 'Email': 'orange',
+  'Search': 'blue', 'News': 'red', 'Education': 'green', 'Finance': 'yellow',
+};
+
+/**
+ * Places tabId into the Chrome tab group matching its URL category.
+ * Creates the group if one doesn't already exist in this window.
+ * Fire-and-forget — all errors are silently swallowed.
+ */
+async function autoGroupTab(tabId, url, windowId) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    let category = null;
+    for (const [keyword, cat] of Object.entries(TAB_CATEGORY_MAP)) {
+      if (host.includes(keyword)) { category = cat; break; }
+    }
+    if (!category) return; // unrecognised site — skip
+
+    const groups = await chrome.tabGroups.query({ windowId });
+    const existing = groups.find(
+      g => g.title && g.title.trim().toLowerCase() === category.toLowerCase()
+    );
+
+    if (existing) {
+      await chrome.tabs.group({ tabIds: [tabId], groupId: existing.id });
+    } else {
+      const groupId = await chrome.tabs.group({ tabIds: [tabId] });
+      await chrome.tabGroups.update(groupId, {
+        title: category,
+        color: TAB_CATEGORY_COLORS[category] || 'grey',
+        collapsed: false,
+      });
+    }
+  } catch { /* non-fatal */ }
+}
 
 async function callBartMNLI(text, candidateLabels, apiKey) {
   const res = await fetch(HF_API_URL, {
@@ -653,6 +724,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   const domain = getDomain(url);
   if (!domain) return;
+
+  // ── Auto-group tab by category (fire-and-forget, always runs) ──
+  // Runs before blocking checks. If the tab gets redirected to a block
+  // page, that redirect fires onUpdated with chrome-extension:// which
+  // is filtered at the top, so grouping a to-be-blocked tab is harmless.
+  autoGroupTab(tabId, url, tab.windowId);
 
   console.log('[FlowState] Checking:', domain, 'against workspace:', ws.name);
 
