@@ -529,13 +529,13 @@ let selectedGroupValue = '';
 async function populateGroupSelect() {
   if (!$groupBlockOptions) return;
   $groupBlockOptions.innerHTML = '<li class="placeholder-option">Select an open group...</li>';
-  
+
   try {
     const groups = await chrome.tabGroups.query({});
-    
+
     // Create a Set to ensure unique names if multiple groups have identical names
     const uniqueNames = new Set();
-    
+
     for (const g of groups) {
       if (g.title && g.title.trim()) {
         uniqueNames.add(g.title.trim());
@@ -548,7 +548,7 @@ async function populateGroupSelect() {
     } else {
       $groupBlockOptions.innerHTML = ''; // clear placeholder
     }
-    
+
     for (const title of uniqueNames) {
       const li = document.createElement('li');
       li.textContent = title;
@@ -656,7 +656,7 @@ $btnAddGroupBlock.addEventListener('click', async () => {
 
     await selectWorkspace(selectedWsId);
   }
-  
+
   // Reset the custom dropdown state after adding
   selectedGroupValue = '';
   $groupBlockDisplay.textContent = 'Select an open group...';
@@ -1330,6 +1330,7 @@ async function renderFocusScore() {
 
   const score = latestSession.focusScore ?? 0;
   const blocks = latestSession.blockedAttempts ?? 0;
+  const mins = latestSession.deepFocusMinutes ?? 0;
 
   // Color tier
   $focusScoreRing.className = 'focus-score-ring';
@@ -1342,7 +1343,8 @@ async function renderFocusScore() {
   const $title = document.querySelector('.focus-score-label');
   if ($title) $title.textContent = 'LAST SESSION SCORE';
 
-  $focusScoreSub.textContent = `${blocks} block${blocks !== 1 ? 's' : ''}`;
+  const minsText = mins > 0 ? `${mins} min` : '<1 min';
+  $focusScoreSub.textContent = `${minsText} · ${blocks} block${blocks !== 1 ? 's' : ''}`;
   $focusScoreStrip.classList.remove('hidden');
 }
 
