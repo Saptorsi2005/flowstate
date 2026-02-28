@@ -1555,6 +1555,15 @@ async function startBreakPhase(mode, sessionCount) {
  */
 async function pausePomodoro() {
   const pom = await getPomodoroState();
+
+  // ── Break is non-pausable ───────────────────────────────────────
+  // Break must run its full duration to ensure genuine rest.
+  // Reject the request without touching alarms or state.
+  if (pom.phase === 'break') {
+    console.log('[FlowState Pomodoro] pausePomodoro() rejected — break phase cannot be paused.');
+    return { success: false, reason: 'Break phase cannot be paused' };
+  }
+
   if (!pom.isRunning || pom.isPaused) return { success: false, reason: 'Not running or already paused' };
 
   const remaining = Math.max(0, pom.endTime - Date.now());

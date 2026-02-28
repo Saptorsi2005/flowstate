@@ -1539,36 +1539,42 @@ function renderPomodoroUI(pom) {
       isBreak ? 'pom-arc--break' : ''
   );
 
-  // ── Pause / Resume / Start button ──
-  // Button is ALWAYS enabled — action depends on current state:
-  //   idle    → "▶ Start"   (sends pomodoro-start)
-  //   running → "⏸ Pause"  (sends pomodoro-pause)
-  //   paused  → "▶ Resume" (sends pomodoro-resume)
-  $btnPomPause.disabled = false;
-  if (isIdle) {
-    $btnPomPause.textContent = '▶ Start';
-    $btnPomPause.classList.add('pom-btn--resume');
-  } else if (isPaused) {
-    $btnPomPause.textContent = '▶ Resume';
-    $btnPomPause.classList.add('pom-btn--resume');
+  // ── Pause / Resume / Start button ──────────────────────────────
+  // BREAK IS NON-PAUSABLE: button is hidden during break phase.
+  // Two enforcement layers:
+  //   1. UI  — button hidden, no click possible
+  //   2. SW  — pausePomodoro() rejects phase==='break' at the source
+  if (isBreak) {
+    $btnPomPause.classList.add('hidden');
   } else {
-    $btnPomPause.textContent = '⏸ Pause';
-    $btnPomPause.classList.remove('pom-btn--resume');
+    $btnPomPause.classList.remove('hidden');
+    $btnPomPause.disabled = false;
+    if (isIdle) {
+      $btnPomPause.textContent = '▶ Start';
+      $btnPomPause.classList.add('pom-btn--resume');
+    } else if (isPaused) {
+      $btnPomPause.textContent = '▶ Resume';
+      $btnPomPause.classList.add('pom-btn--resume');
+    } else {
+      $btnPomPause.textContent = '⏸ Pause';
+      $btnPomPause.classList.remove('pom-btn--resume');
+    }
   }
 
-  // ── Status bar ──
-  if (isIdle) {
+  // ── Status bar ──────────────────────────────────────────────────
+  if (isBreak) {
+    $pomStatusBar.textContent = '🔒 Break Mode Active — runs its full duration';
+    $pomStatusBar.className = 'pom-status-bar pom-status-bar--break';
+  } else if (isIdle) {
     $pomStatusBar.textContent = '▶ Click Start to begin your first focus session';
     $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
-  } else if (isBreak && !isPaused) {
-    $pomStatusBar.textContent = '🎉 Break time — all sites unlocked';
-    $pomStatusBar.className = 'pom-status-bar pom-status-bar--break';
   } else if (isPaused) {
     $pomStatusBar.textContent = '⏸ Timer paused — blocking active';
     $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
   } else {
     $pomStatusBar.className = 'pom-status-bar hidden';
   }
+
 }
 
 /** Read Pomodoro state from storage and render. */
