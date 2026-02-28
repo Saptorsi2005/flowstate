@@ -10,9 +10,15 @@
  *   4. Focus timer start/stop
  *   5. Intent unlock (including AI-scored reasons in strict mode)
  *   6. Tab removal cleanup
+ *   7. Pomodoro timer (25 min work / 5 min break, alarm-based)
  */
 
 import { initSyncListener } from "../utils/sync.js";
+import {
+  WORK_MS, BREAK_MS, WARN_MS,
+  ALARM_WORK_END, ALARM_BREAK_END, ALARM_BREAK_WARN,
+  DEFAULT_POMODORO
+} from "../utils/pomodoro.js";
 
 const HF_API_URL =
   'https://router.huggingface.co/hf-inference/models/facebook/bart-large-mnli';
@@ -721,9 +727,20 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     url.startsWith('edge://')) return;
 
   const data = await chrome.storage.local.get(
-    ['activeWorkspaceId', 'workspaces', 'tempUnlockedDomains', 'hfApiKey', 'aiEnabled', 'aiEscalationLevels', 'aiTempBlocks']
+    ['activeWorkspaceId', 'workspaces', 'tempUnlockedDomains', 'hfApiKey', 'aiEnabled',
+      'aiEscalationLevels', 'aiTempBlocks', 'pomodoro']
   );
   if (!data.activeWorkspaceId) return;
+
+  // ── Pomodoro phase guard ─────────────────────────────────────
+  // Only evaluate tabs during the WORK phase. Using phase !== 'work' is
+  // more robust than phase === 'break' — it also catches any unexpected
+  // intermediate states.
+  const pom = data.pomodoro;
+  if (pom?.isRunning && pom?.phase !== 'work') {
+    console.log('[FlowState] Non-work phase (' + pom.phase + ') — blocking bypassed for:', url);
+    return;
+  }
 
   const ws = (data.workspaces || {})[data.activeWorkspaceId];
   if (!ws) return;
@@ -871,10 +888,18 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     }
 
     const data = await chrome.storage.local.get(
-      ['activeWorkspaceId', 'workspaces', 'tempUnlockedDomains', 'hfApiKey', 'aiEnabled', 'aiEscalationLevels', 'aiTempBlocks']
+      ['activeWorkspaceId', 'workspaces', 'tempUnlockedDomains', 'hfApiKey', 'aiEnabled',
+        'aiEscalationLevels', 'aiTempBlocks', 'pomodoro']
     );
     if (!data.activeWorkspaceId) {
       console.log('[FlowState onActivated] No active workspace');
+      return;
+    }
+
+    // ── Pomodoro break guard ──────────────────────────────────
+    const pom = data.pomodoro;
+    if (pom?.isRunning && pom?.phase !== 'work') {
+      console.log('[FlowState onActivated] Non-work phase — blocking bypassed for:', url);
       return;
     }
 
@@ -1122,6 +1147,12 @@ async function handleMessage(msg, sender) {
     case 'ai-score-intent': return handleAiScoreIntent(msg.reason);
     case 'doomscroll-trigger': return handleDoomScrollTrigger(msg, sender);
     case 'doomscroll-classify': return handleDoomScrollClassify(msg.title, msg.url, msg.urlType);
+    // ── Pomodoro messages ──
+    case 'pomodoro-start': return handlePomodoroStart(msg.mode);
+    case 'pomodoro-pause': return handlePomodoroPause();
+    case 'pomodoro-resume': return handlePomodoroResume();
+    case 'pomodoro-reset': return handlePomodoroReset();
+    case 'get-pomodoro-state': return handleGetPomodoroState();
     default: return { error: 'Unknown message type' };
   }
 }
@@ -1314,13 +1345,8 @@ async function activateWorkspace(id) {
       aiTempBlocks: {} // Clear any previous temp blocks
     });
 
-    // Disabled: Auto-restoring saved tabs on activation
-    // If you want to restore tabs, do it manually from the popup
-    // if (ws.savedTabs && ws.savedTabs.length > 0) {
-    //   for (const t of ws.savedTabs) {
-    //     try { await chrome.tabs.create({ url: t.url, active: false }); } catch { }
-    //   }
-    // }
+    // ── Auto-start Pomodoro in WORK phase ──
+    await startWorkPhase(ws.focusMode || 'easy');
 
     // Don't check or block tabs immediately on activation - let tabs.onUpdated handle it naturally
     // This prevents infinite loops and double-blocking
@@ -1406,6 +1432,8 @@ async function deactivateWorkspace() {
       aiEscalationLevels: {},
       aiTempBlocks: {}
     });
+    // ── Reset Pomodoro on deactivation ──
+    await resetPomodoro();
     return { success: true, elapsed };
   } catch (err) {
     return { success: false, error: err.message };
@@ -1431,6 +1459,397 @@ async function handleUnlock(domain, tabId) {
 }
 
 initSyncListener();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POMODORO TIMER ENGINE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Start the WORK phase.
+ * Clears any existing Pomodoro alarms, persists state, and schedules the
+ * work-end alarm. Called on workspace activation and automatically after
+ * each break ends.
+ *
+ * @param {string} mode  'easy' | 'strict'
+ * @param {number} [sessionCount]  carry-over session count (default: existing + 0)
+ */
+async function startWorkPhase(mode, sessionCount) {
+  await clearPomodoroAlarms();
+
+  const existing = await getPomodoroState();
+  const count = sessionCount ?? existing.sessionCount ?? 0;
+  const endTime = Date.now() + WORK_MS;
+
+  await chrome.storage.local.set({
+    pomodoro: {
+      ...DEFAULT_POMODORO,
+      isRunning: true,
+      isPaused: false,
+      phase: 'work',
+      endTime,
+      pausedRemaining: 0,
+      selectedMode: mode,
+      sessionCount: count,
+    }
+  });
+
+  chrome.alarms.create(ALARM_WORK_END, { delayInMinutes: WORK_MS / 60000 });
+  console.log('[FlowState Pomodoro] WORK phase started. Mode:', mode, 'Session:', count, 'Ends:', new Date(endTime).toISOString());
+}
+
+/**
+ * Start the BREAK phase.
+ * Schedules two alarms: break-end and break-warn (1 min before end).
+ * Called automatically when the work alarm fires.
+ *
+ * @param {string} mode  carry-over mode from the work phase
+ * @param {number} sessionCount  number of completed work sessions
+ */
+async function startBreakPhase(mode, sessionCount) {
+  await clearPomodoroAlarms();
+
+  const endTime = Date.now() + BREAK_MS;
+  const warnTime = endTime - WARN_MS;
+
+  await chrome.storage.local.set({
+    pomodoro: {
+      ...DEFAULT_POMODORO,
+      isRunning: true,
+      isPaused: false,
+      phase: 'break',
+      endTime,
+      pausedRemaining: 0,
+      selectedMode: mode,
+      sessionCount,
+    }
+  });
+
+  chrome.alarms.create(ALARM_BREAK_END, { delayInMinutes: BREAK_MS / 60000 });
+
+  // Only schedule warning if there's enough time left
+  if (warnTime > Date.now()) {
+    chrome.alarms.create(ALARM_BREAK_WARN, { delayInMinutes: (warnTime - Date.now()) / 60000 });
+  }
+
+  console.log('[FlowState Pomodoro] BREAK phase started. Session:', sessionCount, 'Ends:', new Date(endTime).toISOString());
+
+  // Release any tabs currently sitting on the blocked / soft-redirect pages.
+  // This navigates them back to the original URL immediately so the user
+  // doesn't have to manually refresh or navigate away.
+  releaseBlockedTabs();
+
+  // Show break-start notification
+  chrome.notifications.create('fs-break-start', {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+    title: 'FlowState — Break Time! 🎉',
+    message: 'Great work! You have 5 minutes. All blocking is paused.',
+  });
+}
+
+/**
+ * Pause the currently running Pomodoro.
+ * Records pausedRemaining and clears the scheduled alarm.
+ */
+async function pausePomodoro() {
+  const pom = await getPomodoroState();
+  if (!pom.isRunning || pom.isPaused) return { success: false, reason: 'Not running or already paused' };
+
+  const remaining = Math.max(0, pom.endTime - Date.now());
+  await clearPomodoroAlarms();
+
+  await chrome.storage.local.set({
+    pomodoro: { ...pom, isRunning: false, isPaused: true, pausedRemaining: remaining }
+  });
+
+  console.log('[FlowState Pomodoro] PAUSED. Remaining:', remaining, 'ms');
+  return { success: true, remaining };
+}
+
+/**
+ * Resume a paused Pomodoro.
+ * Recalculates endTime from pausedRemaining and re-creates alarms.
+ */
+async function resumePomodoro() {
+  const pom = await getPomodoroState();
+  if (!pom.isPaused) return { success: false, reason: 'Not paused' };
+
+  const remaining = pom.pausedRemaining || (pom.phase === 'work' ? WORK_MS : BREAK_MS);
+  const endTime = Date.now() + remaining;
+  const alarmName = pom.phase === 'work' ? ALARM_WORK_END : ALARM_BREAK_END;
+
+  await chrome.storage.local.set({
+    pomodoro: { ...pom, isRunning: true, isPaused: false, endTime, pausedRemaining: 0 }
+  });
+
+  chrome.alarms.create(alarmName, { delayInMinutes: remaining / 60000 });
+
+  // Re-schedule break warning if we're in break phase
+  if (pom.phase === 'break') {
+    const warnAt = endTime - WARN_MS;
+    if (warnAt > Date.now()) {
+      chrome.alarms.create(ALARM_BREAK_WARN, { delayInMinutes: (warnAt - Date.now()) / 60000 });
+    }
+  }
+
+  console.log('[FlowState Pomodoro] RESUMED. Remaining:', remaining, 'ms');
+  return { success: true };
+}
+
+/**
+ * Reset Pomodoro to idle state and clear all alarms.
+ * Blocking resumes immediately because phase is no longer 'break'.
+ */
+async function resetPomodoro() {
+  await clearPomodoroAlarms();
+  await chrome.storage.local.set({ pomodoro: { ...DEFAULT_POMODORO } });
+  console.log('[FlowState Pomodoro] RESET to idle.');
+  return { success: true };
+}
+
+/**
+ * Handle phase transitions triggered by alarms.
+ *
+ * Race-condition safety:
+ *   - We write the new phase to storage FIRST (inside startWorkPhase /
+ *     startBreakPhase), then call reactivateBlocking().
+ *   - reactivateBlocking() does a fresh storage read to confirm the phase
+ *     is still 'work' before applying any redirects. This prevents a
+ *     stale-closure read in case the user manually reset during the tiny
+ *     window between the alarm firing and reactivateBlocking executing.
+ *
+ * @param {'work-end'|'break-end'} event
+ */
+async function handlePhaseTransition(event) {
+  const pom = await getPomodoroState();
+
+  if (event === 'work-end') {
+    console.log('[FlowState Pomodoro] Work phase ended → starting break.');
+    await startBreakPhase(pom.selectedMode || 'easy', (pom.sessionCount || 0) + 1);
+    // Blocking is now OFF — no tab evaluation needed.
+
+  } else if (event === 'break-end') {
+    console.log('[FlowState Pomodoro] Break phase ended → resuming work.');
+    // 1. Write new WORK state to storage (phase becomes 'work').
+    await startWorkPhase(pom.selectedMode || 'easy', pom.sessionCount || 0);
+    // 2. Immediately evaluate all active tabs — do not wait for next navigation.
+    await reactivateBlocking();
+  }
+}
+
+/** Fire the 1-minute break-ending warning notification. */
+function fireBreakWarningNotification() {
+  chrome.notifications.create('fs-break-warn', {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+    title: 'FlowState — Break ending soon ⚠️',
+    message: 'Break ending in 1 minute. Focus mode resuming.',
+  });
+  console.log('[FlowState Pomodoro] Break warning notification fired.');
+}
+
+/**
+ * releaseBlockedTabs()
+ *
+ * Finds every tab currently showing the extension's blocked.html or
+ * soft-redirect.html page and navigates it directly back to the
+ * original blocked URL, making it accessible immediately when break starts.
+ *
+ * The blocked pages embed the original URL as a `url=` query param:
+ *   chrome-extension://<id>/pages/blocked.html?url=https%3A%2F%2Freddit.com...
+ *   chrome-extension://<id>/pages/soft-redirect.html?url=https%3A%2F%2Freddit.com...
+ *
+ * We extract that param and call chrome.tabs.update() to navigate.
+ * This is fire-and-forget — errors are swallowed per-tab so one bad tab
+ * can’t prevent the others from being released.
+ */
+async function releaseBlockedTabs() {
+  const extOrigin = chrome.runtime.getURL('');
+  // Match both blocked.html and soft-redirect.html pages
+  const blockedPagePattern = extOrigin + 'pages/';
+
+  let allTabs;
+  try {
+    // Query all tabs across all windows
+    allTabs = await chrome.tabs.query({});
+  } catch (err) {
+    console.warn('[FlowState] releaseBlockedTabs(): tabs.query failed', err);
+    return;
+  }
+
+  let released = 0;
+  for (const tab of allTabs) {
+    if (!tab.url || !tab.url.startsWith(blockedPagePattern)) continue;
+
+    try {
+      const tabUrl = new URL(tab.url);
+      const originalUrl = tabUrl.searchParams.get('url');
+      if (!originalUrl) continue;
+
+      // Navigate directly to the original site — break guard in
+      // tabs.onUpdated will see phase='break' and not re-block it.
+      await chrome.tabs.update(tab.id, { url: originalUrl });
+      released++;
+      console.log('[FlowState] releaseBlockedTabs(): released tab', tab.id, '→', originalUrl);
+    } catch (err) {
+      console.warn('[FlowState] releaseBlockedTabs(): failed to release tab', tab.id, err);
+    }
+  }
+
+  if (released > 0) {
+    console.log('[FlowState] releaseBlockedTabs(): released', released, 'tab(s) for break.');
+  }
+}
+
+/**
+ * reactivateBlocking() — called immediately when the break alarm fires.
+ *
+ * Queries all active tabs across all browser windows and re-runs the
+ * blocking evaluation logic for each. This ensures that if the user is
+ * sitting on a blocked domain when break ends, they are redirected
+ * immediately without needing to navigate or switch tabs.
+ *
+ * Race-condition prevention:
+ *   - Reads phase from storage AFTER startWorkPhase has committed it.
+ *   - Aborts early if phase is not 'work' (handles edge case where user
+ *     manually reset the session between the alarm fire and this call).
+ *   - Skips tabs with no activeWorkspaceId (workspace deactivated during break).
+ */
+async function reactivateBlocking() {
+  console.log('[FlowState Pomodoro] reactivateBlocking() — evaluating open tabs...');
+
+  // ── Post-write guard: re-read storage to confirm phase is still 'work' ──
+  // This handles the race where the user clicks Reset between
+  // startWorkPhase() writing and us reaching this point.
+  const data = await chrome.storage.local.get(
+    ['pomodoro', 'activeWorkspaceId', 'workspaces', 'tempUnlockedDomains',
+      'hfApiKey', 'aiEnabled', 'aiEscalationLevels', 'aiTempBlocks']
+  );
+
+  const pom = data.pomodoro;
+
+  // Guard 1: Session was manually stopped or reset during break — do nothing.
+  if (!pom?.isRunning || pom?.phase !== 'work') {
+    console.log('[FlowState Pomodoro] reactivateBlocking() aborted: phase is', pom?.phase, 'isRunning:', pom?.isRunning);
+    return;
+  }
+
+  // Guard 2: No workspace is active.
+  if (!data.activeWorkspaceId) {
+    console.log('[FlowState Pomodoro] reactivateBlocking() aborted: no active workspace.');
+    return;
+  }
+
+  const ws = (data.workspaces || {})[data.activeWorkspaceId];
+  if (!ws) return;
+
+  // Query every window's currently active tab.
+  // Using allWindows:true so we catch detached windows and secondary monitors.
+  let activeTabs;
+  try {
+    activeTabs = await chrome.tabs.query({ active: true });
+  } catch (err) {
+    console.warn('[FlowState Pomodoro] reactivateBlocking(): tabs.query failed', err);
+    return;
+  }
+
+  for (const tab of activeTabs) {
+    const url = tab.url;
+    if (!url) continue;
+
+    // Skip extension and browser internal pages.
+    if (url.startsWith('chrome-extension://') ||
+      url.startsWith('chrome://') ||
+      url.startsWith('about:') ||
+      url.startsWith('edge://')) continue;
+
+    const domain = getDomain(url);
+    if (!domain) continue;
+
+    console.log('[FlowState Pomodoro] reactivateBlocking(): evaluating tab', tab.id, domain);
+
+    // Skip temp-unlocked tabs (user had an intent-unlock during work phase).
+    const unlocked = data.tempUnlockedDomains || [];
+    if (unlocked.some(u => u.tabId === tab.id && domain.includes(u.domain))) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): tab is temp-unlocked, skipping.');
+      continue;
+    }
+
+    // Allowed domains are never blocked.
+    if (isDomainInList(domain, ws.allowedDomains)) continue;
+
+    // ── Check manual blocklist ──
+    if (isDomainInList(domain, ws.blockedDomains)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting blocked tab:', domain);
+      redirectBlocked(tab.id, url, ws.focusMode, 'manual');
+      continue;
+    }
+
+    // ── Check AI temp-blocks ──
+    if (data.aiEnabled && data.hfApiKey) {
+      const aiTempBlocks = data.aiTempBlocks || {};
+      if (aiTempBlocks[domain] && aiTempBlocks[domain].blockedUntil > Date.now()) {
+        console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting AI-blocked tab:', domain);
+        redirectBlocked(tab.id, url, 'strict', 'ai-temp-block');
+        continue;
+      }
+      // For full AI classification on reactivation, run async (non-blocking).
+      // The tab will be re-classified on next navigation if this misses.
+      classifyAndMaybeBlock(tab.id, url, domain, ws, data.hfApiKey, data);
+    }
+  }
+
+  console.log('[FlowState Pomodoro] reactivateBlocking() complete. Evaluated', activeTabs.length, 'tab(s).');
+}
+
+/** Read current pomodoro state from storage (with defaults). */
+async function getPomodoroState() {
+  const { pomodoro } = await chrome.storage.local.get('pomodoro');
+  return { ...DEFAULT_POMODORO, ...(pomodoro || {}) };
+}
+
+/** Clear all three Pomodoro alarms. */
+async function clearPomodoroAlarms() {
+  await Promise.all([
+    chrome.alarms.clear(ALARM_WORK_END),
+    chrome.alarms.clear(ALARM_BREAK_END),
+    chrome.alarms.clear(ALARM_BREAK_WARN),
+  ]);
+}
+
+// ── Pomodoro message handlers ──────────────────────────────────
+async function handlePomodoroStart(mode) {
+  try {
+    await startWorkPhase(mode || 'easy');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function handlePomodoroPause() {
+  try { return await pausePomodoro(); }
+  catch (err) { return { success: false, error: err.message }; }
+}
+
+async function handlePomodoroResume() {
+  try { return await resumePomodoro(); }
+  catch (err) { return { success: false, error: err.message }; }
+}
+
+async function handlePomodoroReset() {
+  try { return await resetPomodoro(); }
+  catch (err) { return { success: false, error: err.message }; }
+}
+
+async function handleGetPomodoroState() {
+  try {
+    const pom = await getPomodoroState();
+    return { success: true, pomodoro: pom };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
 
 // ── Auth0 Device Code Flow polling (lives in SW so popup close is safe) ─────
 // Popup sends FS_START_DEVICE_POLL → SW stores deviceCode + schedules alarms
@@ -1460,6 +1879,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  // ── Pomodoro alarm handlers ──
+  if (alarm.name === ALARM_WORK_END) { await handlePhaseTransition('work-end'); return; }
+  if (alarm.name === ALARM_BREAK_END) { await handlePhaseTransition('break-end'); return; }
+  if (alarm.name === ALARM_BREAK_WARN) { fireBreakWarningNotification(); return; }
+
   if (alarm.name !== _AUTH_ALARM) return;
 
   const { _pendingDeviceCode, _pollIntervalSecs } =
@@ -1516,5 +1940,48 @@ chrome.storage.local.get('syncJwt').then(({ syncJwt }) => {
   if (syncJwt) {
     console.log('[FlowState Sync] SW startup: scheduling immediate sync for logged-in user');
     chrome.alarms.create('flowstate-sync', { delayInMinutes: 0.1 }); // ~6 seconds
+  }
+});
+
+// ── Pomodoro SW startup restoration ──────────────────────────────────────────
+// When the service worker restarts (e.g. after suspension, browser restart, or
+// extension reload), we must restore any in-progress Pomodoro session.
+// If the phase already expired while the SW was asleep, we transition immediately.
+// If there's time left, we re-create the alarm with the correct remaining duration.
+chrome.storage.local.get('pomodoro').then(({ pomodoro: pom }) => {
+  if (!pom || (!pom.isRunning && !pom.isPaused)) return;
+
+  console.log('[FlowState Pomodoro] SW startup: found persisted state:', pom);
+
+  if (pom.isPaused) {
+    // Paused — no alarm needed; user must resume manually. State is already correct.
+    console.log('[FlowState Pomodoro] SW startup: session is paused, waiting for user resume.');
+    return;
+  }
+
+  if (!pom.isRunning) return;
+
+  const remaining = pom.endTime - Date.now();
+
+  if (remaining <= 0) {
+    // Phase already expired while SW was sleeping → transition immediately
+    console.log('[FlowState Pomodoro] SW startup: phase expired while sleeping, transitioning now.');
+    const event = pom.phase === 'work' ? 'work-end' : 'break-end';
+    handlePhaseTransition(event);
+    return;
+  }
+
+  // Phase still in progress — re-create the alarm with the remaining duration
+  const alarmName = pom.phase === 'work' ? ALARM_WORK_END : ALARM_BREAK_END;
+  chrome.alarms.create(alarmName, { delayInMinutes: remaining / 60000 });
+  console.log('[FlowState Pomodoro] SW startup: re-created alarm', alarmName, 'remaining:', Math.round(remaining / 1000), 's');
+
+  // Also re-create the break warning alarm if in break phase
+  if (pom.phase === 'break') {
+    const warnAt = pom.endTime - WARN_MS;
+    if (warnAt > Date.now()) {
+      chrome.alarms.create(ALARM_BREAK_WARN, { delayInMinutes: (warnAt - Date.now()) / 60000 });
+      console.log('[FlowState Pomodoro] SW startup: re-created break-warn alarm.');
+    }
   }
 });

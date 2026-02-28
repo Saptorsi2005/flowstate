@@ -716,7 +716,13 @@ function renderTodos(ws) {
 // ── Timer Polling ──────────────────────────────────────────────
 function startTimerPolling() {
   updateTimer();
-  timerInterval = setInterval(updateTimer, 1000);
+  // pollPomodoro is defined in Section 5 (hoisted as async function).
+  // Guarded so it gracefully no-ops if Section 5 hasn't been evaluated yet.
+  if (typeof pollPomodoro === 'function') pollPomodoro();
+  timerInterval = setInterval(() => {
+    updateTimer();
+    if (typeof pollPomodoro === 'function') pollPomodoro();
+  }, 1000);
 }
 
 async function updateTimer() {
@@ -1348,3 +1354,222 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.dailyFocusStats) renderFocusScore();
 });
 
+// ═══════════════════════════════════════════════════════════════
+// SECTION 5: POMODORO TIMER UI
+// ═══════════════════════════════════════════════════════════════
+
+import { formatPomodoroTime, arcProgress, WORK_MS, BREAK_MS } from '../utils/pomodoro.js';
+
+// ── DOM refs ───────────────────────────────────────────────────
+const $pomPanel = document.getElementById('pomodoro-panel');
+const $pomPhaseDot = document.getElementById('pom-phase-dot');
+const $pomPhaseLabel = document.getElementById('pom-phase-label');
+const $pomSessionCount = document.getElementById('pom-session-count');
+const $pomCountdown = document.getElementById('pom-countdown');
+const $pomSubLabel = document.getElementById('pom-sub-label');
+const $pomProgress = document.getElementById('pom-progress');
+const $pomStatusBar = document.getElementById('pom-status-bar');
+const $btnPomPause = document.getElementById('btn-pom-pause');
+const $btnPomReset = document.getElementById('btn-pom-reset');
+
+// SVG arc circumference for r=42 → 2πr ≈ 263.9
+const DASH = 263.9;
+
+// Track last-rendered state hash to avoid redundant DOM writes
+let _lastPomHash = '';
+
+/**
+ * Render the Pomodoro panel from a pomodoro state object.
+ * Computes remaining ms, updates arc, phase labels, countdown, and buttons.
+ * @param {object} pom
+ */
+function renderPomodoroUI(pom) {
+  if (!pom) return;
+
+  // ── Compute remaining ms ──
+  let remaining;
+  if (pom.isPaused) {
+    remaining = pom.pausedRemaining || 0;
+  } else if (pom.isRunning) {
+    remaining = Math.max(0, pom.endTime - Date.now());
+  } else {
+    // Idle / just reset — show full duration
+    remaining = pom.phase === 'work' ? WORK_MS : BREAK_MS;
+  }
+
+  // Skip render if nothing changed (avoids SVG janking every second)
+  const hash = `${pom.phase}|${pom.isRunning}|${pom.isPaused}|${Math.round(remaining / 1000)}`;
+  if (hash === _lastPomHash) return;
+  _lastPomHash = hash;
+
+  const isWork = pom.phase === 'work';
+  const isBreak = pom.phase === 'break';
+  const isPaused = pom.isPaused;
+  const isIdle = !pom.isRunning && !pom.isPaused;
+
+  // ── Phase dot ──
+  $pomPhaseDot.className = 'pom-dot ' + (
+    isPaused ? 'pom-dot--paused' :
+      !pom.isRunning && !pom.isPaused ? 'pom-dot--idle' :
+        isWork ? 'pom-dot--work' : 'pom-dot--break'
+  );
+
+  // ── Phase label ──
+  $pomPhaseLabel.textContent = isPaused ? 'PAUSED' : isWork ? 'WORK' : 'BREAK';
+  $pomPhaseLabel.className = 'pom-phase-label ' + (
+    isPaused ? 'pom-phase-label--paused' :
+      isWork ? 'pom-phase-label--work' : 'pom-phase-label--break'
+  );
+
+  // ── Panel phase class (drives break-mode button colours) ──
+  $pomPanel.classList.toggle('pom-phase--break', isBreak && !isPaused);
+
+  // ── Ambient glow colour ──
+  const glowColor = isPaused
+    ? 'rgba(251, 191, 36, 0.07)'
+    : isBreak ? 'rgba(52, 211, 153, 0.07)'
+      : 'rgba(34, 211, 238, 0.07)';
+  $pomPanel.style.setProperty('--pom-glow', glowColor);
+
+  // ── Session counter ──
+  const n = pom.sessionCount || 0;
+  $pomSessionCount.textContent = n > 0 ? `Session ${n + 1}` : 'Session 1';
+
+  // ── Countdown text ──
+  $pomCountdown.textContent = formatPomodoroTime(remaining);
+  $pomCountdown.style.color = isPaused
+    ? 'var(--accent-amber)'
+    : isBreak ? 'var(--accent-emerald)'
+      : 'var(--text)';
+
+  // ── Sub-label ──
+  $pomSubLabel.textContent = isIdle ? 'ready' : isPaused ? 'paused' : isWork ? 'focus' : 'break';
+
+  // ── SVG arc ──
+  // stroke-dashoffset 0 = full circle (just started), DASH = no arc (expired)
+  const progress = arcProgress(remaining, pom.phase);
+  $pomProgress.style.strokeDashoffset = String(DASH * (1 - progress));
+  $pomProgress.className = 'pom-arc ' + (
+    isPaused ? 'pom-arc--paused' :
+      isBreak ? 'pom-arc--break' : ''
+  );
+
+  // ── Pause / Resume / Start button ──
+  // Button is ALWAYS enabled — action depends on current state:
+  //   idle    → "▶ Start"   (sends pomodoro-start)
+  //   running → "⏸ Pause"  (sends pomodoro-pause)
+  //   paused  → "▶ Resume" (sends pomodoro-resume)
+  $btnPomPause.disabled = false;
+  if (isIdle) {
+    $btnPomPause.textContent = '▶ Start';
+    $btnPomPause.classList.add('pom-btn--resume');
+  } else if (isPaused) {
+    $btnPomPause.textContent = '▶ Resume';
+    $btnPomPause.classList.add('pom-btn--resume');
+  } else {
+    $btnPomPause.textContent = '⏸ Pause';
+    $btnPomPause.classList.remove('pom-btn--resume');
+  }
+
+  // ── Status bar ──
+  if (isIdle) {
+    $pomStatusBar.textContent = '▶ Click Start to begin your first focus session';
+    $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
+  } else if (isBreak && !isPaused) {
+    $pomStatusBar.textContent = '🎉 Break time — all sites unlocked';
+    $pomStatusBar.className = 'pom-status-bar pom-status-bar--break';
+  } else if (isPaused) {
+    $pomStatusBar.textContent = '⏸ Timer paused — blocking active';
+    $pomStatusBar.className = 'pom-status-bar pom-status-bar--paused';
+  } else {
+    $pomStatusBar.className = 'pom-status-bar hidden';
+  }
+}
+
+/** Read Pomodoro state from storage and render. */
+async function pollPomodoro() {
+  try {
+    const { pomodoro } = await chrome.storage.local.get('pomodoro');
+    renderPomodoroUI(pomodoro);
+  } catch { /* SW may be waking — silently skip */ }
+}
+
+// ── Initial Pomodoro render on popup open ──────────────────────
+// startTimerPolling (called from init) now calls pollPomodoro too.
+// This one-shot call covers the case where Section 5 loads AFTER
+// startTimerPolling already ran (async init ordering).
+pollPomodoro();
+
+// ── Show/hide panel when workspace activates/deactivates ────────
+// Reacts to storage changes so the panel updates even while popup is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.activeWorkspaceId || changes.pomodoro) {
+    chrome.storage.local.get(['activeWorkspaceId', 'pomodoro']).then(({ activeWorkspaceId, pomodoro }) => {
+      if (activeWorkspaceId) {
+        $pomPanel.classList.remove('hidden');
+        _lastPomHash = '';           // force re-render on phase change
+        renderPomodoroUI(pomodoro);
+      } else {
+        $pomPanel.classList.add('hidden');
+      }
+    });
+  }
+});
+
+// ── Initial visibility on popup open ───────────────────────────
+(async () => {
+  const { activeWorkspaceId, pomodoro } = await chrome.storage.local.get(['activeWorkspaceId', 'pomodoro']);
+  if (activeWorkspaceId) {
+    $pomPanel.classList.remove('hidden');
+    renderPomodoroUI(pomodoro);
+  }
+})();
+
+// ── Start / Pause / Resume button ─────────────────────────────
+$btnPomPause.addEventListener('click', async () => {
+  $btnPomPause.disabled = true;
+  try {
+    const { pomodoro, activeWorkspaceId, workspaces } = await chrome.storage.local.get(
+      ['pomodoro', 'activeWorkspaceId', 'workspaces']
+    );
+    const pom = pomodoro || {};
+    const isIdle = !pom.isRunning && !pom.isPaused;
+
+    let msgType, msgPayload = {};
+    if (isIdle) {
+      // Not running yet — start a fresh work phase using workspace focus mode
+      const ws = (workspaces || {})[activeWorkspaceId];
+      msgType = 'pomodoro-start';
+      msgPayload = { mode: ws?.focusMode || 'easy' };
+    } else if (pom.isPaused) {
+      msgType = 'pomodoro-resume';
+    } else {
+      msgType = 'pomodoro-pause';
+    }
+
+    await chrome.runtime.sendMessage({ type: msgType, ...msgPayload });
+    _lastPomHash = ''; // force re-render
+    await pollPomodoro();
+  } catch (err) {
+    console.warn('[FlowState Pomodoro] Start/Pause/Resume error:', err);
+  } finally {
+    $btnPomPause.disabled = false;
+  }
+});
+
+// ── Reset button ────────────────────────────────────────────────
+$btnPomReset.addEventListener('click', async () => {
+  $btnPomReset.disabled = true;
+  $btnPomReset.textContent = '…';
+  try {
+    await chrome.runtime.sendMessage({ type: 'pomodoro-reset' });
+    _lastPomHash = '';
+    await pollPomodoro();
+  } catch (err) {
+    console.warn('[FlowState Pomodoro] Reset error:', err);
+  } finally {
+    $btnPomReset.disabled = false;
+    $btnPomReset.textContent = '↺ Reset';
+  }
+});
