@@ -351,6 +351,7 @@ const $btnActivate = document.getElementById('btn-activate');
 (async () => {
   try {
     await renderWorkspaces();
+    await populateGroupSelect();
     await syncActiveState();
     startTimerPolling();
   } catch (e) { console.error('FlowState init error:', e); }
@@ -515,8 +516,72 @@ function renderDomainList(container, domains, type) {
 
 // ── Allowed Group Names (renders as chips) ───────────────────────
 const $groupBlockList = document.getElementById('group-block-list');
-const $groupBlockInput = document.getElementById('group-block-input');
+
+// Custom Select Elements
+const $groupBlockWrapper = document.getElementById('group-block-wrapper');
+const $groupBlockTrigger = document.getElementById('group-block-trigger');
+const $groupBlockDisplay = document.getElementById('group-block-display');
+const $groupBlockOptions = document.getElementById('group-block-options');
 const $btnAddGroupBlock = document.getElementById('btn-add-group-block');
+
+let selectedGroupValue = '';
+
+async function populateGroupSelect() {
+  if (!$groupBlockOptions) return;
+  $groupBlockOptions.innerHTML = '<li class="placeholder-option">Select an open group...</li>';
+  
+  try {
+    const groups = await chrome.tabGroups.query({});
+    
+    // Create a Set to ensure unique names if multiple groups have identical names
+    const uniqueNames = new Set();
+    
+    for (const g of groups) {
+      if (g.title && g.title.trim()) {
+        uniqueNames.add(g.title.trim());
+      }
+    }
+
+    if (uniqueNames.size === 0) {
+      $groupBlockOptions.innerHTML = '<li class="placeholder-option">No named groups open...</li>';
+      return;
+    } else {
+      $groupBlockOptions.innerHTML = ''; // clear placeholder
+    }
+    
+    for (const title of uniqueNames) {
+      const li = document.createElement('li');
+      li.textContent = title;
+      li.addEventListener('click', () => {
+        selectedGroupValue = title;
+        $groupBlockDisplay.textContent = title;
+        $groupBlockTrigger.classList.add('has-value');
+        $groupBlockOptions.classList.add('hidden');
+        $groupBlockTrigger.classList.remove('active');
+      });
+      $groupBlockOptions.appendChild(li);
+    }
+  } catch (err) {
+    console.warn("Could not fetch tab groups:", err);
+  }
+}
+
+// Toggle dropdown open/close logic
+if ($groupBlockTrigger) {
+  $groupBlockTrigger.addEventListener('click', (e) => {
+    e.stopPropagation(); // prevent document click listener from firing
+    $groupBlockOptions.classList.toggle('hidden');
+    $groupBlockTrigger.classList.toggle('active');
+  });
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  if ($groupBlockWrapper && !$groupBlockWrapper.contains(e.target)) {
+    $groupBlockOptions?.classList.add('hidden');
+    $groupBlockTrigger?.classList.remove('active');
+  }
+});
 
 function renderGroupBlockList(names) {
   $groupBlockList.innerHTML = '';
@@ -562,7 +627,7 @@ function renderGroupBlockList(names) {
 }
 
 $btnAddGroupBlock.addEventListener('click', async () => {
-  const raw = $groupBlockInput.value.trim();
+  const raw = selectedGroupValue;
   if (!raw) return;
   const ws = await getWorkspace(selectedWsId);
   if (!ws) return;
@@ -591,12 +656,11 @@ $btnAddGroupBlock.addEventListener('click', async () => {
 
     await selectWorkspace(selectedWsId);
   }
-  $groupBlockInput.value = '';
-});
-
-$groupBlockInput.addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter') return;
-  $btnAddGroupBlock.click();
+  
+  // Reset the custom dropdown state after adding
+  selectedGroupValue = '';
+  $groupBlockDisplay.textContent = 'Select an open group...';
+  $groupBlockTrigger.classList.remove('has-value');
 });
 
 

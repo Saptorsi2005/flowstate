@@ -93,7 +93,15 @@
         <label class="detail-label">Allowed Tab Groups</label>
         <div id="group-block-list" class="domain-list"></div>
         <div class="domain-add">
-          <input id="group-block-input" placeholder="e.g. Research" />
+          <div class="custom-select-wrapper" id="group-block-wrapper">
+            <div class="custom-select-trigger" id="group-block-trigger">
+              <span id="group-block-display">Select an open group...</span>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <ul class="custom-select-options hidden" id="group-block-options">
+              <!-- Options populated via JS -->
+            </ul>
+          </div>
           <button id="btn-add-group-block">+</button>
         </div>
         <p style="font-size:11px;color:var(--text-muted);margin-top:4px">

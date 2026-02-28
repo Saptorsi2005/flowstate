@@ -517,6 +517,120 @@ section:hover {
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* ── Custom Select Dropdown ───────────────────────── */
+.custom-select-wrapper {
+  flex: 1;
+  position: relative;
+  user-select: none;
+}
+
+.custom-select-trigger {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  height: 100%;
+}
+
+.custom-select-trigger:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-hover);
+}
+
+.custom-select-trigger.active {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1), 0 0 16px rgba(34, 211, 238, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.custom-select-trigger span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  /* By default it's a placeholder */
+}
+
+.custom-select-trigger.has-value span {
+  color: var(--text);
+}
+
+.custom-select-options {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: rgba(20, 20, 24, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.custom-select-options.hidden {
+  display: none;
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* Chrome scrollbar styles for dropdown */
+.custom-select-options::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-select-options::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+
+.custom-select-options::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.custom-select-options::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.custom-select-options li {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+
+.custom-select-options li:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.custom-select-options li.placeholder-option {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+}
+
+.custom-select-options li.placeholder-option:hover {
+  background: transparent;
+}
+
 .domain-add button {
   padding: 8px 14px;
   font-size: 16px;
