@@ -76,6 +76,7 @@ export function createWorkspace(name) {
     allowedDomains: [],
     blockedGroupNames: [],
     blockedGroupDomains: {},
+    allowedGroupNames: [],
     savedTabs: [],
     todos: []
   };

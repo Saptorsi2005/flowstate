@@ -502,6 +502,29 @@ async function isTabInBlockedGroup(tabId, ws) {
   }
 }
 
+/**
+ * DEFAULT-DENY GROUP MODEL
+ * If ws.allowedGroupNames has entries, ONLY tabs inside those groups are allowed.
+ * Ungrouped tabs and tabs in unlisted groups are blocked.
+ *
+ * Returns:
+ *   true  → tab is in an allowed group (or no restriction applies)
+ *   false → tab must be blocked
+ */
+async function isTabAllowedByGroup(tabId, ws) {
+  if (!ws?.allowedGroupNames?.length) return true; // empty = no restriction
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.groupId || tab.groupId === -1) return true; // ungrouped tabs are never restricted by allowed-group logic
+    const group = await chrome.tabGroups.get(tab.groupId);
+    if (!group?.title) return false;
+    return ws.allowedGroupNames.some(
+      name => name.toLowerCase() === group.title.trim().toLowerCase()
+    );
+  } catch {
+    return true; // fail open — don't block if API unavailable
+  }
+}
 
 // ── Tab Group Blocking Helpers ────────────────────────────────
 
@@ -661,16 +684,25 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return;
   }
 
-  // ── 1. Manual + group blocklist check (nav listener) ──
-  // Also live-checks the tab’s actual Chrome tab group by name.
-  const effectiveBlocked1 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
-  const manuallyBlocked = isDomainInList(domain, effectiveBlocked1)
-    || await isTabInBlockedGroup(tabId, ws);
-
-  if (manuallyBlocked) {
-    console.log('[FlowState] Blocking (manual):', domain);
-    redirectBlocked(tabId, url, ws.focusMode, 'manual');
-    return;
+  // -- 1. Group + domain blocking (nav listener) --
+  // A) allowedGroupNames set ? DEFAULT-DENY: only allowed groups pass
+  // B) allowedGroupNames empty ? LEGACY: check blockedDomains + blockedGroupNames
+  if (ws.allowedGroupNames?.length) {
+    const tabAllowed = await isTabAllowedByGroup(tabId, ws);
+    if (!tabAllowed) {
+      console.log('[FlowState] Blocking (not in allowed group):', domain);
+      redirectBlocked(tabId, url, ws.focusMode, 'manual');
+      return;
+    }
+  } else {
+    const effectiveBlocked1 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+    const manuallyBlocked = isDomainInList(domain, effectiveBlocked1)
+      || await isTabInBlockedGroup(tabId, ws);
+    if (manuallyBlocked) {
+      console.log('[FlowState] Blocking (manual):', domain);
+      redirectBlocked(tabId, url, ws.focusMode, 'manual');
+      return;
+    }
   }
 
   // ── 1.5a. YouTube safe-path guard ──
@@ -785,16 +817,25 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       return;
     }
 
-    // ── 1. Manual + group blocklist check (activation listener) ──
-    // Also live-checks the tab’s actual Chrome tab group by name.
-    const effectiveBlocked2 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
-    const manuallyBlocked = isDomainInList(domain, effectiveBlocked2)
-      || await isTabInBlockedGroup(activeInfo.tabId, ws);
-
-    if (manuallyBlocked) {
-      console.log('[FlowState] Blocking activated tab (manual):', domain);
-      redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
-      return;
+    // -- 1. Group + domain blocking (activation listener) --
+    // A) allowedGroupNames set ? DEFAULT-DENY: only allowed groups pass
+    // B) allowedGroupNames empty ? LEGACY: check blockedDomains + blockedGroupNames
+    if (ws.allowedGroupNames?.length) {
+      const tabAllowed = await isTabAllowedByGroup(activeInfo.tabId, ws);
+      if (!tabAllowed) {
+        console.log('[FlowState] Blocking activated tab (not in allowed group):', domain);
+        redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
+        return;
+      }
+    } else {
+      const effectiveBlocked2 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+      const manuallyBlocked = isDomainInList(domain, effectiveBlocked2)
+        || await isTabInBlockedGroup(activeInfo.tabId, ws);
+      if (manuallyBlocked) {
+        console.log('[FlowState] Blocking activated tab (manual):', domain);
+        redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
+        return;
+      }
     }
 
     // ── 1.5a. YouTube safe-path guard ──

@@ -443,7 +443,7 @@ async function selectWorkspace(id) {
   // Domain lists
   renderDomainList($blockedList, ws.blockedDomains, 'blocked');
   renderDomainList($allowedList, ws.allowedDomains, 'allowed');
-  renderGroupBlockList(ws.blockedGroupNames || []);
+  renderGroupBlockList(ws.allowedGroupNames || []);
 
   // Saved tabs count
   $savedTabsCount.textContent = ws.savedTabs.length;
@@ -513,7 +513,7 @@ function renderDomainList(container, domains, type) {
   });
 }
 
-// ── Group Block List (renders blocked group names as chips) ─────
+// ── Allowed Group Names (renders as chips) ───────────────────────
 const $groupBlockList = document.getElementById('group-block-list');
 const $groupBlockInput = document.getElementById('group-block-input');
 const $btnAddGroupBlock = document.getElementById('btn-add-group-block');
@@ -521,7 +521,7 @@ const $btnAddGroupBlock = document.getElementById('btn-add-group-block');
 function renderGroupBlockList(names) {
   $groupBlockList.innerHTML = '';
   if (!names || names.length === 0) {
-    $groupBlockList.innerHTML = '<span class="empty-domains">None</span>';
+    $groupBlockList.innerHTML = '<span class="empty-domains">None — all groups allowed</span>';
     return;
   }
   for (const name of names) {
@@ -537,35 +537,24 @@ function renderGroupBlockList(names) {
       if (!ws) return;
       const removedName = el.dataset.name;
 
-      // 1. Remove group from workspace
-      ws.blockedGroupNames = (ws.blockedGroupNames || []).filter(n => n !== removedName);
-      // 2. Clear pre-resolved domains so blocking check stops immediately
-      if (ws.blockedGroupDomains) delete ws.blockedGroupDomains[removedName];
+      // Remove from allowedGroupNames
+      ws.allowedGroupNames = (ws.allowedGroupNames || []).filter(n => n !== removedName);
       await saveWorkspace(ws);
 
-      // 3. Restore any tabs currently stuck on a block page that belong to this group
-      //    Block pages store the original URL in their ?url= query param.
+      // Restore all tabs currently on block pages — any tab might now be allowed
+      // since removing an allowed group re-opens the allow-list
       try {
         const BLOCK_PAGES = ['blocked.html', 'soft-redirect.html', 'ai-escalation.html'];
         const allTabs = await chrome.tabs.query({});
         for (const tab of allTabs) {
           if (!tab.url) continue;
-          const isBlockPage = BLOCK_PAGES.some(p => tab.url.includes(p));
-          if (!isBlockPage) continue;
-          // Check if this tab is in the group we just unblocked
-          if (tab.groupId && tab.groupId !== -1) {
-            try {
-              const group = await chrome.tabGroups.get(tab.groupId);
-              if (group?.title?.trim().toLowerCase() === removedName.toLowerCase()) {
-                const originalUrl = new URL(tab.url).searchParams.get('url');
-                if (originalUrl) {
-                  await chrome.tabs.update(tab.id, { url: decodeURIComponent(originalUrl) });
-                }
-              }
-            } catch { /* group may have been deleted */ }
+          if (!BLOCK_PAGES.some(p => tab.url.includes(p))) continue;
+          const originalUrl = new URL(tab.url).searchParams.get('url');
+          if (originalUrl) {
+            await chrome.tabs.update(tab.id, { url: decodeURIComponent(originalUrl) });
           }
         }
-      } catch { /* tab restore is best-effort */ }
+      } catch { /* best-effort */ }
 
       await selectWorkspace(selectedWsId);
     });
@@ -577,10 +566,29 @@ $btnAddGroupBlock.addEventListener('click', async () => {
   if (!raw) return;
   const ws = await getWorkspace(selectedWsId);
   if (!ws) return;
-  if (!ws.blockedGroupNames) ws.blockedGroupNames = [];
-  if (!ws.blockedGroupNames.includes(raw)) {
-    ws.blockedGroupNames.push(raw);
+  if (!ws.allowedGroupNames) ws.allowedGroupNames = [];
+  if (!ws.allowedGroupNames.includes(raw)) {
+    ws.allowedGroupNames.push(raw);
     await saveWorkspace(ws);
+
+    // Restore blocked tabs that belong to the newly-allowed group
+    try {
+      const BLOCK_PAGES = ['blocked.html', 'soft-redirect.html', 'ai-escalation.html'];
+      const allTabs = await chrome.tabs.query({});
+      for (const tab of allTabs) {
+        if (!tab.url || !BLOCK_PAGES.some(p => tab.url.includes(p))) continue;
+        if (tab.groupId && tab.groupId !== -1) {
+          try {
+            const group = await chrome.tabGroups.get(tab.groupId);
+            if (group?.title?.trim().toLowerCase() === raw.toLowerCase()) {
+              const originalUrl = new URL(tab.url).searchParams.get('url');
+              if (originalUrl) await chrome.tabs.update(tab.id, { url: decodeURIComponent(originalUrl) });
+            }
+          } catch { /* group may not exist */ }
+        }
+      }
+    } catch { /* best-effort */ }
+
     await selectWorkspace(selectedWsId);
   }
   $groupBlockInput.value = '';
@@ -590,6 +598,7 @@ $groupBlockInput.addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
   $btnAddGroupBlock.click();
 });
+
 
 // ── Todo Rendering ─────────────────────────────────────────────
 function renderTodos(ws) {
