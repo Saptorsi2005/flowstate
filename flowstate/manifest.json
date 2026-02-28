@@ -32,12 +32,24 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*"
+      ],
+      "js": [
+        "content/doomscroll.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "web_accessible_resources": [
     {
       "resources": [
         "pages/blocked.html",
         "pages/soft-redirect.html",
-        "pages/ai-escalation.html"
+        "pages/ai-escalation.html",
+        "content/doomscroll.js"
       ],
       "matches": [
         "<all_urls>"
