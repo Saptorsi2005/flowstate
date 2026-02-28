@@ -36,6 +36,35 @@
         </div>
       </div>
     </div>
+    <!-- ── Pomodoro Panel ── -->
+    <section id="pomodoro-panel" class="hidden">
+      <div class="pom-header">
+        <div class="pom-phase-wrap">
+          <span id="pom-phase-dot" class="pom-dot pom-dot--work"></span>
+          <span id="pom-phase-label" class="pom-phase-label">WORK</span>
+        </div>
+        <span id="pom-session-count" class="pom-session">Session 1</span>
+      </div>
+
+      <div id="pom-ring-wrap">
+        <svg id="pom-ring" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <circle class="pom-track" cx="50" cy="50" r="42"/>
+          <circle id="pom-progress" class="pom-arc" cx="50" cy="50" r="42"
+                  stroke-dasharray="263.9" stroke-dashoffset="0"/>
+        </svg>
+        <div class="pom-center">
+          <span id="pom-countdown">25:00</span>
+          <span id="pom-sub-label">focus</span>
+        </div>
+      </div>
+
+      <div class="pom-controls">
+        <button id="btn-pom-pause" class="pom-btn pom-btn--pause">⏸ Pause</button>
+        <button id="btn-pom-reset" class="pom-btn pom-btn--reset">↺ Reset</button>
+      </div>
+
+      <div id="pom-status-bar" class="pom-status-bar hidden"></div>
+    </section>
 
     <!-- Activity Heatmap -->
     <section id="heatmap-section">
