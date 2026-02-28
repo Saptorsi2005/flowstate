@@ -1,15 +1,22 @@
 /**
  * api/dashboard.js — GET /api/dashboard
  *
- * Returns aggregated focus data for the authenticated user.
- * Used exclusively by the React frontend — never by the extension.
+ * Returns real user + workspace data from Neon for the React dashboard.
+ * Never called by the extension.
  *
- * Response is computed at request-time from Neon.
- * For high traffic, add Vercel KV caching in front of getDashboardData().
+ * Response:
+ * {
+ *   user:       { id, email, name, created_at },
+ *   workspaces: [ ... ],
+ *   stats: {
+ *     totalWorkspaces,
+ *     totalSavedTabs
+ *   }
+ * }
  */
 
 import { verifyRequest, AuthError } from '../lib/auth.js';
-import { getDb, upsertUser, getDashboardData } from '../lib/db.js';
+import { getDb, initDB } from '../lib/db.js';
 import { checkRateLimit, rateLimitKey } from '../lib/ratelimit.js';
 
 const CORS_HEADERS = {
@@ -25,14 +32,15 @@ function setCors(res) {
 export default async function handler(req, res) {
     setCors(res);
 
-    // ── CORS preflight ────────────────────────────────────────────
-    if (req.method === 'OPTIONS') {
-        res.status(204).end();
-        return;
-    }
+    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    if (req.method !== 'GET') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-    if (req.method !== 'GET') {
-        res.status(405).json({ error: 'Method not allowed' });
+    // ── Ensure tables exist ───────────────────────────────────────
+    try {
+        await initDB();
+    } catch (err) {
+        console.error('[dashboard] initDB failed:', err.message);
+        res.status(500).json({ error: 'Database initialization failed' });
         return;
     }
 
@@ -41,45 +49,68 @@ export default async function handler(req, res) {
     try {
         identity = await verifyRequest(req);
     } catch (err) {
-        const status = err instanceof AuthError ? err.status : 401;
-        res.status(status).json({ error: err.message });
+        res.status(err instanceof AuthError ? err.status : 401).json({ error: err.message });
         return;
     }
 
     // ── Rate limit: 60 reads/minute ───────────────────────────────
     const rl = checkRateLimit(rateLimitKey(identity.sub, 'dashboard'), 60, 60_000);
     if (!rl.allowed) {
-        res.status(429).json({
-            error: 'Rate limit exceeded',
-            resetMs: rl.resetMs,
-        });
+        res.status(429).json({ error: 'Rate limit exceeded', resetMs: rl.resetMs });
         return;
     }
 
+    // ── Fetch data from Neon ──────────────────────────────────────
     try {
         const sql = getDb();
+        const userId = identity.sub;
 
-        // Ensure user exists (may be first dashboard load before any sync)
-        const user = await upsertUser(sql, identity.sub, identity.email);
+        // Fetch user
+        const userRows = await sql`
+      SELECT id, email, name, created_at
+      FROM users
+      WHERE id = ${userId}
+    `;
 
-        // Fetch all dashboard data in parallel queries
-        const data = await getDashboardData(sql, user.id);
+        if (userRows.length === 0) {
+            // User has never synced — return empty state, not an error
+            res.status(200).json({
+                user: null,
+                workspaces: [],
+                stats: { totalWorkspaces: 0, totalSavedTabs: 0 },
+            });
+            return;
+        }
+
+        const user = userRows[0];
+
+        // Fetch workspaces
+        const workspaces = await sql`
+      SELECT
+        id, name, focus_mode,
+        blocked_domains, allowed_domains,
+        todos, saved_tabs_count, created_at
+      FROM workspaces
+      WHERE user_id = ${userId}
+      ORDER BY created_at ASC
+    `;
+
+        // Compute stats
+        const totalSavedTabs = workspaces.reduce(
+            (sum, ws) => sum + (ws.saved_tabs_count ?? 0), 0
+        );
 
         res.status(200).json({
-            user: {
-                email: user.email,
-                createdAt: user.created_at,
+            user,
+            workspaces,
+            stats: {
+                totalWorkspaces: workspaces.length,
+                totalSavedTabs,
             },
-            workspaces: data.workspaces,
-            recentSessions: data.recentSessions,
-            topBlockedDomains: data.topBlockedDomains,
-            weeklyStats: data.weeklyStats,
-            totalFocusTimeMs: data.totalFocusTimeMs,
-            totalSessions: data.totalSessions,
         });
 
     } catch (err) {
-        console.error('[FlowState /api/dashboard] DB error:', err);
-        res.status(500).json({ error: 'Internal server error' });
+        console.error('[dashboard] DB error:', err.message, err.stack);
+        res.status(500).json({ error: 'Database error' });
     }
 }

@@ -783,3 +783,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     chrome.alarms.create(_AUTH_ALARM, { delayInMinutes: intervalSecs / 60 });
   }
 });
+
+// ── Startup sync: fire a sync shortly after SW wakes ─────────────────────────
+// Catches already-logged-in users whose workspaces predate login,
+// or who reloaded the extension — no workspace change needed to trigger.
+chrome.storage.local.get('syncJwt').then(({ syncJwt }) => {
+  if (syncJwt) {
+    console.log('[FlowState Sync] SW startup: scheduling immediate sync for logged-in user');
+    chrome.alarms.create('flowstate-sync', { delayInMinutes: 0.1 }); // ~6 seconds
+  }
+});
