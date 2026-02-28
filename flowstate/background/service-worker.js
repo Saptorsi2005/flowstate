@@ -1434,6 +1434,8 @@ async function deactivateWorkspace() {
     });
     // ── Reset Pomodoro on deactivation ──
     await resetPomodoro();
+    // ── Release any currently blocked tabs ──
+    await releaseBlockedTabs();
     return { success: true, elapsed };
   } catch (err) {
     return { success: false, error: err.message };
