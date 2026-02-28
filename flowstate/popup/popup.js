@@ -409,6 +409,7 @@ async function renderHeatmap() {
   
   try {
     const { syncJwt } = await chrome.storage.local.get('syncJwt');
+    console.log('[FlowState Heatmap] syncJwt present:', !!syncJwt);
     if (syncJwt) {
       const res = await fetch('https://flowstate-backend.vercel.app/api/heatmap', {
         headers: { 'Authorization': `Bearer ${syncJwt}` },
@@ -417,27 +418,38 @@ async function renderHeatmap() {
       if (res.ok) {
         const data = await res.json();
         sessions = data.sessions || [];
+        console.log(`[FlowState Heatmap] Fetched ${sessions.length} sessions`);
+      } else {
+        console.warn('[FlowState Heatmap] API error:', res.status);
       }
     }
   } catch (err) {
-    console.warn('[FlowState] Could not fetch heatmap data:', err.message);
+    console.warn('[FlowState Heatmap] Catch error:', err.message);
   }
 
   // We want to fill a grid of 154 cells (approx 22 weeks * 7 days)
   const maxCells = 154;
   
   // Create grid cells (latest sessions first, but we render them to fill the grid)
-  // If we have fewer than 154 sessions, first cells will be empty (grey)
   for (let i = 0; i < maxCells; i++) {
-    // Fill from total minus sessions.length down to 0
+    // Fill the grid bottom-right to top-left with sessions[0...N]
+    // sessionIndex = (Total count of sessions we HAVE - 1) - (Relative index from end of grid)
+    // Actually, simpler: sessions[0] is newest. Cell 153 is newest.
+    // So for i = 153, sessionIndex = 0.
+    // For i = 152, sessionIndex = 1.
+    // index = (maxCells - 1) - i
     const sessionIndex = (maxCells - 1) - i;
-    const session = sessions[sessionIndex];
+    // sessionIndex will go from 153 down to 0 as i goes from 0 up to 153.
+    // sessions[0] is latest. sessions[sessions.length-1] is oldest.
+    // We want sessions[0] at the end (i=153), sessions[N] at (153-N).
+    const session = (sessionIndex >= 0 && sessionIndex < sessions.length) ? sessions[sessionIndex] : null;
     
     let level = 0;
-    let tooltipText = "No session data";
+    let tooltipText = "No focus activity";
 
     if (session) {
       const score = session.score || 0;
+      console.log(`[FlowState Heatmap] Cell ${i} (idx ${sessionIndex}) -> Score: ${score}`);
       if (score > 0) {
         if (score < 30) level = 1;
         else if (score < 60) level = 2;
@@ -449,7 +461,7 @@ async function renderHeatmap() {
       const displayDate = date.toLocaleDateString(undefined, { 
         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
       });
-      const durationMins = Math.round((session.duration || 0) / 60000);
+      const durationMins = session.duration_mins || 0;
       
       tooltipText = `Score: ${score} · ${durationMins} min · ${session.blocks || 0} blocks\n${displayDate}`;
     }

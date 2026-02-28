@@ -40,17 +40,18 @@ export default async function handler(req, res) {
         const sql = getDb();
         const userId = identity.sub;
 
-        // Query the latest 154 sessions (22 weeks * 7 days grid) for the user
+        // Query the latest 154 individual sessions from focus_stats
+        // Note: created_at is a TIMESTAMP, date is just the DATE portion.
         const sessions = await sql`
       SELECT 
         id,
         focus_score as score, 
         blocked_attempts as blocks,
-        total_duration_ms as duration,
-        start_time as started_at
+        deep_focus_minutes as duration_mins,
+        created_at as started_at
       FROM focus_stats
       WHERE user_id = ${userId}
-      ORDER BY start_time DESC
+      ORDER BY created_at DESC
       LIMIT 154
     `;
 
