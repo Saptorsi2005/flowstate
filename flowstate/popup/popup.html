@@ -24,6 +24,48 @@
       <button id="btn-deactivate">Deactivate</button>
     </div>
 
+    <!-- Focus Score Strip (today's score, shown when data exists) -->
+    <div id="focus-score-strip" class="hidden">
+      <div class="focus-score-inner">
+        <div class="focus-score-ring" id="focus-score-ring">
+          <span id="focus-score-value">--</span>
+        </div>
+        <div class="focus-score-meta">
+          <span class="focus-score-label">Last Session Score</span>
+          <span class="focus-score-sub" id="focus-score-sub"></span>
+        </div>
+      </div>
+    </div>
+    <!-- ── Pomodoro Panel ── -->
+    <section id="pomodoro-panel" class="hidden">
+      <div class="pom-header">
+        <div class="pom-phase-wrap">
+          <span id="pom-phase-dot" class="pom-dot pom-dot--work"></span>
+          <span id="pom-phase-label" class="pom-phase-label">WORK</span>
+        </div>
+        <span id="pom-session-count" class="pom-session">Session 1</span>
+      </div>
+
+      <div id="pom-ring-wrap">
+        <svg id="pom-ring" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <circle class="pom-track" cx="50" cy="50" r="42"/>
+          <circle id="pom-progress" class="pom-arc" cx="50" cy="50" r="42"
+                  stroke-dasharray="263.9" stroke-dashoffset="0"/>
+        </svg>
+        <div class="pom-center">
+          <span id="pom-countdown">25:00</span>
+          <span id="pom-sub-label">focus</span>
+        </div>
+      </div>
+
+      <div class="pom-controls">
+        <button id="btn-pom-pause" class="pom-btn pom-btn--pause">⏸ Pause</button>
+        <button id="btn-pom-reset" class="pom-btn pom-btn--reset">↺ Reset</button>
+      </div>
+
+      <div id="pom-status-bar" class="pom-status-bar hidden"></div>
+    </section>
+
     <!-- Status message -->
     <p id="status" class="hidden"></p>
 
@@ -93,7 +135,15 @@
         <label class="detail-label">Allowed Tab Groups</label>
         <div id="group-block-list" class="domain-list"></div>
         <div class="domain-add">
-          <input id="group-block-input" placeholder="e.g. Research" />
+          <div class="custom-select-wrapper" id="group-block-wrapper">
+            <div class="custom-select-trigger" id="group-block-trigger">
+              <span id="group-block-display">Select an open group...</span>
+              <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <ul class="custom-select-options hidden" id="group-block-options">
+              <!-- Options populated via JS -->
+            </ul>
+          </div>
           <button id="btn-add-group-block">+</button>
         </div>
         <p style="font-size:11px;color:var(--text-muted);margin-top:4px">

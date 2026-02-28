@@ -2,8 +2,7 @@
  * lib/db.js — Neon Postgres client + auto-bootstrap
  *
  * Tables are created automatically on first cold start.
- * New columns are added via ALTER TABLE … ADD COLUMN IF NOT EXISTS
- * so the live DB self-heals without manual migration.
+ * Schema evolves via self-healing ALTER TABLE / DROP CONSTRAINT statements.
  */
 
 import { neon } from '@neondatabase/serverless';
@@ -27,7 +26,7 @@ export async function initDB() {
 
   const sql = getDb();
 
-  // ── Create tables ─────────────────────────────────────────────
+  // ── Core tables ───────────────────────────────────────────────
   await sql`
     CREATE TABLE IF NOT EXISTS users (
       id          TEXT PRIMARY KEY,
@@ -51,8 +50,31 @@ export async function initDB() {
     )
   `;
 
-  // ── Self-heal: add new columns if they don't exist ────────────
-  // All ADD COLUMN IF NOT EXISTS are idempotent — safe on live DB.
+  // ── Focus Stats: one row PER SESSION (no unique workspace+date constraint) ──
+  await sql`
+    CREATE TABLE IF NOT EXISTS focus_stats (
+      id                   TEXT PRIMARY KEY,
+      user_id              TEXT NOT NULL,
+      workspace_id         TEXT NOT NULL,
+      date                 DATE NOT NULL,
+      deep_focus_minutes   INTEGER DEFAULT 0,
+      blocked_attempts     INTEGER DEFAULT 0,
+      successful_unlocks   INTEGER DEFAULT 0,
+      failed_unlocks       INTEGER DEFAULT 0,
+      strict_mode_minutes  INTEGER DEFAULT 0,
+      focus_score          INTEGER DEFAULT 0,
+      created_at           TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  // Drop the old UNIQUE(workspace_id, date) constraint if it exists
+  // (it prevented multiple sessions per workspace per day)
+  await sql`
+    ALTER TABLE focus_stats
+    DROP CONSTRAINT IF EXISTS focus_stats_workspace_id_date_key
+  `;
+
+  // ── Self-heal: add workspace columns if missing ────────────────
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_names TEXT[] DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS blocked_group_domains JSONB DEFAULT '{}'`;
   await sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()`;
