@@ -1293,4 +1293,58 @@ function hideError() {
   $accountError.classList.add('hidden');
   $accountError.textContent = '';
 }
+// ── Focus Score Strip ───────────────────────────────────────────
+const $focusScoreStrip = document.getElementById('focus-score-strip');
+const $focusScoreRing = document.getElementById('focus-score-ring');
+const $focusScoreValue = document.getElementById('focus-score-value');
+const $focusScoreSub = document.getElementById('focus-score-sub');
+
+async function renderFocusScore() {
+  const { dailyFocusStats } = await chrome.storage.local.get('dailyFocusStats');
+  if (!dailyFocusStats) { $focusScoreStrip.classList.add('hidden'); return; }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  let latestSession = null;
+  let maxSessionId = '';
+
+  for (const [id, stat] of Object.entries(dailyFocusStats)) {
+    if (stat.date === today) {
+      // sessionId starts with Date.now().toString(36), so alphabetical sort perfectly finds the latest
+      if (id > maxSessionId) {
+        maxSessionId = id;
+        latestSession = stat;
+      }
+    }
+  }
+
+  if (!latestSession) {
+    $focusScoreStrip.classList.add('hidden'); return;
+  }
+
+  const score = latestSession.focusScore ?? 0;
+  const blocks = latestSession.blockedAttempts ?? 0;
+
+  // Color tier
+  $focusScoreRing.className = 'focus-score-ring';
+  if (score < 30) $focusScoreRing.classList.add('focus-score-ring--red');
+  else if (score < 60) $focusScoreRing.classList.add('focus-score-ring--amber');
+  // else stays green (default)
+
+  $focusScoreValue.textContent = score;
+
+  const $title = document.querySelector('.focus-score-label');
+  if ($title) $title.textContent = 'LAST SESSION SCORE';
+
+  $focusScoreSub.textContent = `${blocks} block${blocks !== 1 ? 's' : ''}`;
+  $focusScoreStrip.classList.remove('hidden');
+}
+
+// Render on popup open
+renderFocusScore();
+
+// Re-render live when a session ends and writes dailyFocusStats
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.dailyFocusStats) renderFocusScore();
+});
 

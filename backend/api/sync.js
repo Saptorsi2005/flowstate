@@ -1,5 +1,9 @@
 /**
  * api/sync.js — POST /api/sync
+ * Persists workspaces + per-session focus_stats from the Chrome extension.
+ *
+ * focus_stats: each entry has a unique session `id` (generated on activate).
+ * ON CONFLICT (id) DO UPDATE re-syncs the same session safely if retried.
  */
 
 import { verifyRequest, AuthError } from '../lib/auth.js';
@@ -40,19 +44,21 @@ export default async function handler(req, res) {
     }
 
     const workspaces = body?.workspaces ?? [];
+    const focusStats = body?.focus_stats ?? [];
     if (!Array.isArray(workspaces)) { res.status(400).json({ error: 'workspaces must be an array' }); return; }
 
     try {
         const sql = getDb();
         const { sub: userId, email = null, name = null } = identity;
 
+        // 1. Upsert user
         await sql`
       INSERT INTO users (id, email, name) VALUES (${userId}, ${email}, ${name})
       ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name
     `;
 
+        // 2. Replace workspaces
         await sql`DELETE FROM workspaces WHERE user_id = ${userId}`;
-
         for (const ws of workspaces) {
             await sql`
         INSERT INTO workspaces (
@@ -68,6 +74,34 @@ export default async function handler(req, res) {
           ${ws.allowedGroupNames ?? []},
           ${JSON.stringify(ws.todos ?? [])}, ${ws.savedTabsCount ?? 0}, NOW()
         )
+      `;
+        }
+
+        // 3. Upsert focus_stats — each session has a unique id, safe to re-upsert on retry
+        for (const fs of focusStats) {
+            if (!fs.id || !fs.workspace_id || !fs.date) continue;
+            await sql`
+        INSERT INTO focus_stats (
+          id, user_id, workspace_id, date,
+          deep_focus_minutes, blocked_attempts,
+          successful_unlocks, failed_unlocks,
+          strict_mode_minutes, focus_score
+        ) VALUES (
+          ${fs.id}, ${userId}, ${fs.workspace_id}, ${fs.date},
+          ${fs.deep_focus_minutes ?? 0},
+          ${fs.blocked_attempts ?? 0},
+          ${fs.successful_unlocks ?? 0},
+          ${fs.failed_unlocks ?? 0},
+          ${fs.strict_mode_minutes ?? 0},
+          ${fs.focus_score ?? 0}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          deep_focus_minutes  = EXCLUDED.deep_focus_minutes,
+          blocked_attempts    = EXCLUDED.blocked_attempts,
+          successful_unlocks  = EXCLUDED.successful_unlocks,
+          failed_unlocks      = EXCLUDED.failed_unlocks,
+          strict_mode_minutes = EXCLUDED.strict_mode_minutes,
+          focus_score         = EXCLUDED.focus_score
       `;
         }
 
