@@ -24,6 +24,128 @@ const _aiCache = new Map();
 let _previousTabId = null;
 let _currentTabId = null;
 
+// ── Social Media Domain Detection ────────────────────────────────
+// Brand names matched against the second-level domain (SLD).
+// Catches ALL subdomains (m., api., business.), mobile variants,
+// and country TLD versions automatically — no manual listing needed.
+const SOCIAL_MEDIA_BRANDS = new Set([
+  'instagram', 'facebook', 'twitter', 'x', 'tiktok',
+  // NOTE: 'youtube' is intentionally excluded — YouTube is handled
+  // route-specifically (Shorts only) via isYouTubeShorts() below.
+  'snapchat', 'linkedin', 'reddit', 'pinterest', 'whatsapp',
+  'telegram', 'discord', 'tumblr', 'threads', 'twitch',
+  'vimeo', 'dailymotion', 'weibo', 'bereal', 'quora',
+  'messenger', 'signal', 'mastodon', 'clubhouse',
+]);
+
+// Exact hostname matches for URL shorteners and special cases
+// whose name doesn’t match the parent platform brand.
+const SOCIAL_MEDIA_EXACT_DOMAINS = new Set([
+  't.co',            // Twitter shortlink
+  'fb.com',          // Facebook shortlink
+  'fb.me',           // Facebook shortlink
+  // NOTE: 'youtu.be' excluded — it links to watch pages, not a block-all
+  'instagr.am',      // Instagram shortlink
+  'wa.me',           // WhatsApp click-to-chat
+  'l.instagram.com', // Instagram link redirect
+  'lnkd.in',         // LinkedIn shortlink
+  'vm.tiktok.com',   // TikTok video shortlink
+]);
+
+// Common multi-level public suffixes (simplified PSL subset)
+// so that ‘twitter.co.uk’ correctly extracts SLD ‘twitter’.
+const MULTI_LEVEL_TLDS = new Set([
+  'co.uk', 'co.in', 'co.jp', 'co.nz', 'co.za', 'co.au',
+  'com.au', 'com.br', 'com.mx', 'com.ar', 'com.cn',
+  'net.au', 'org.uk', 'me.uk', 'ltd.uk',
+]);
+
+/**
+ * Extract the brand-level second-level domain from a hostname.
+ *   m.instagram.com       → 'instagram'
+ *   business.facebook.com → 'facebook'
+ *   twitter.co.uk         → 'twitter'
+ *   x.com                 → 'x'
+ */
+function extractSLD(hostname) {
+  const parts = hostname.split('.');
+  if (parts.length <= 1) return hostname;
+  if (parts.length >= 3) {
+    const candidateTld = parts.slice(-2).join('.');
+    if (MULTI_LEVEL_TLDS.has(candidateTld)) return parts[parts.length - 3];
+  }
+  return parts[parts.length - 2]; // standard: brand is second-to-last part
+}
+
+/**
+ * Returns true if ‘url’ belongs to a known social media platform,
+ * regardless of subdomain, mobile prefix, API subdomain, or country TLD.
+ * Uses the URL API for parsing — no naive string matching.
+ */
+function isSocialMediaDomain(url) {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    if (SOCIAL_MEDIA_EXACT_DOMAINS.has(hostname)) return true;
+    const sld = extractSLD(hostname);
+    return sld ? SOCIAL_MEDIA_BRANDS.has(sld) : false;
+  } catch {
+    return false;
+  }
+}
+
+// ── YouTube Route Detection ──────────────────────────────────────
+// YouTube is NEVER blocked at the domain level.
+// Only specific routes are intercepted (/shorts/ only).
+// /watch, /search, /playlist, / are ALWAYS allowed through.
+
+const _YT_HOSTS = new Set(['youtube.com', 'm.youtube.com']);
+
+/**
+ * Returns true ONLY for youtube.com/shorts/* URLs.
+ * Any other YouTube route returns false — never blocked here.
+ */
+function isYouTubeShorts(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    // Match both /shorts (bare) and /shorts/VIDEO_ID
+    return _YT_HOSTS.has(host) &&
+      (u.pathname === '/shorts' || u.pathname.startsWith('/shorts/'));
+  } catch { return false; }
+}
+
+/**
+ * Hard guard — returns true for ANY YouTube URL that must never be blocked:
+ *   youtube.com/            (homepage)
+ *   youtube.com/watch       (videos)
+ *   youtube.com/results/*   (search)
+ *   youtube.com/playlist/*  (playlists)
+ *   youtube.com/channel/*   (channels)
+ *   youtube.com/@*          (handles)
+ *   youtube.com/feed/*      (feeds)
+ *   ...basically everything that isn’t /shorts/*
+ *
+ * This guard sits BEFORE the static social media check and the AI classifier.
+ * It makes it IMPOSSIBLE for non-Shorts YouTube routes to be blocked
+ * by any downstream logic, including AI classification.
+ */
+function isYouTubeSafePath(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!_YT_HOSTS.has(host)) return false; // not YouTube at all
+    // Explicit safeguard for homepage
+    if (u.pathname === '/' || u.pathname === '') return true;
+    // /shorts and /shorts/* are NOT safe — they go through the blocking pipeline
+    if (u.pathname === '/shorts' || u.pathname.startsWith('/shorts/')) return false;
+    // Everything else (watch, search, playlist, channel, @handle, feed) is safe
+    return true;
+  } catch { return false; }
+}
+
+// Per-tab doomscroll escalation levels (in-memory, resets on tab close)
+const _doomScrollLevels = new Map(); // tabId → { level, lastTrigger }
+
 // ── Extension Reload/Install Handler ───────────────────────────
 // Reset workspace state when extension reloads/installs
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -249,6 +371,29 @@ async function isTabInBlockedGroup(tabId, ws) {
   }
 }
 
+/**
+ * DEFAULT-DENY GROUP MODEL
+ * If ws.allowedGroupNames has entries, ONLY tabs inside those groups are allowed.
+ * Ungrouped tabs and tabs in unlisted groups are blocked.
+ *
+ * Returns:
+ *   true  → tab is in an allowed group (or no restriction applies)
+ *   false → tab must be blocked
+ */
+async function isTabAllowedByGroup(tabId, ws) {
+  if (!ws?.allowedGroupNames?.length) return true; // empty = no restriction
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.groupId || tab.groupId === -1) return true; // ungrouped tabs are never restricted by allowed-group logic
+    const group = await chrome.tabGroups.get(tab.groupId);
+    if (!group?.title) return false;
+    return ws.allowedGroupNames.some(
+      name => name.toLowerCase() === group.title.trim().toLowerCase()
+    );
+  } catch {
+    return true; // fail open — don't block if API unavailable
+  }
+}
 
 // ── Tab Group Blocking Helpers ────────────────────────────────
 
@@ -390,15 +535,49 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     return;
   }
 
-  // ── 1. Manual + group blocklist check (nav listener) ──
-  // Also live-checks the tab's actual Chrome tab group by name.
-  const effectiveBlocked1 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
-  const manuallyBlocked = isDomainInList(domain, effectiveBlocked1)
-    || await isTabInBlockedGroup(tabId, ws);
+  // ── 0. YouTube Shorts — highest priority, checked before everything else ──
+  // Must be BEFORE the manual blocklist so that even if the user has
+  // youtube.com in their blocked list (which would trigger a soft-redirect
+  // in easy mode), Shorts always goes directly to blocked.html.
+  if (isYouTubeShorts(url)) {
+    console.log('[FlowState] Blocking YouTube Shorts (direct block) | url:', url);
+    redirectBlocked(tabId, url, 'strict', 'manual');
+    return;
+  }
 
-  if (manuallyBlocked) {
-    console.log('[FlowState] Blocking (manual):', domain);
-    redirectBlocked(tabId, url, ws.focusMode, 'manual');
+  // -- 1. Group + domain blocking (nav listener) --
+  // A) allowedGroupNames set ? DEFAULT-DENY: only allowed groups pass
+  // B) allowedGroupNames empty ? LEGACY: check blockedDomains + blockedGroupNames
+  if (ws.allowedGroupNames?.length) {
+    const tabAllowed = await isTabAllowedByGroup(tabId, ws);
+    if (!tabAllowed) {
+      console.log('[FlowState] Blocking (not in allowed group):', domain);
+      redirectBlocked(tabId, url, ws.focusMode, 'manual');
+      return;
+    }
+  } else {
+    const effectiveBlocked1 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+    const manuallyBlocked = isDomainInList(domain, effectiveBlocked1)
+      || await isTabInBlockedGroup(tabId, ws);
+    if (manuallyBlocked) {
+      console.log('[FlowState] Blocking (manual):', domain);
+      redirectBlocked(tabId, url, ws.focusMode, 'manual');
+      return;
+    }
+  }
+
+  // ── 1.5a. YouTube safe-path guard ──
+  // Any YouTube URL that is NOT /shorts/ is explicitly allowed through
+  // (homepage, watch, search, playlist, channel, @handle, feed).
+  if (isYouTubeSafePath(url)) {
+    console.log('[FlowState] YouTube safe route — explicitly allowed:', url);
+    return;
+  }
+
+  // ── 1.5b. Static social media check ──
+  if (isSocialMediaDomain(url)) {
+    console.log('[FlowState] Blocking (static social media):', domain);
+    redirectBlocked(tabId, url, ws.focusMode, 'ai-block');
     return;
   }
 
@@ -486,15 +665,44 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       return;
     }
 
-    // ── 1. Manual + group blocklist check (activation listener) ──
-    // Also live-checks the tab's actual Chrome tab group by name.
-    const effectiveBlocked2 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
-    const manuallyBlocked = isDomainInList(domain, effectiveBlocked2)
-      || await isTabInBlockedGroup(activeInfo.tabId, ws);
+    // ── 0. YouTube Shorts — highest priority, before manual list ──
+    if (isYouTubeShorts(url)) {
+      console.log('[FlowState] Blocking YouTube Shorts (activated, direct block) | url:', url);
+      redirectBlocked(activeInfo.tabId, url, 'strict', 'manual');
+      return;
+    }
 
-    if (manuallyBlocked) {
-      console.log('[FlowState] Blocking activated tab (manual):', domain);
-      redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
+    // -- 1. Group + domain blocking (activation listener) --
+    // A) allowedGroupNames set ? DEFAULT-DENY: only allowed groups pass
+    // B) allowedGroupNames empty ? LEGACY: check blockedDomains + blockedGroupNames
+    if (ws.allowedGroupNames?.length) {
+      const tabAllowed = await isTabAllowedByGroup(activeInfo.tabId, ws);
+      if (!tabAllowed) {
+        console.log('[FlowState] Blocking activated tab (not in allowed group):', domain);
+        redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
+        return;
+      }
+    } else {
+      const effectiveBlocked2 = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+      const manuallyBlocked = isDomainInList(domain, effectiveBlocked2)
+        || await isTabInBlockedGroup(activeInfo.tabId, ws);
+      if (manuallyBlocked) {
+        console.log('[FlowState] Blocking activated tab (manual):', domain);
+        redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'manual');
+        return;
+      }
+    }
+
+    // ── 1.5a. YouTube safe-path guard ──
+    if (isYouTubeSafePath(url)) {
+      console.log('[FlowState] YouTube safe route (activated tab) — explicitly allowed:', url);
+      return;
+    }
+
+    // ── 1.5b. Static social media check ──
+    if (isSocialMediaDomain(url)) {
+      console.log('[FlowState] Blocking activated tab (static social media):', domain);
+      redirectBlocked(activeInfo.tabId, url, ws.focusMode, 'ai-block');
       return;
     }
 
@@ -670,6 +878,8 @@ async function handleMessage(msg, sender) {
     case 'request-unlock': return handleUnlock(msg.domain, msg.tabId);
     case 'ai-classify': return handleAiClassify(msg.url, msg.title);
     case 'ai-score-intent': return handleAiScoreIntent(msg.reason);
+    case 'doomscroll-trigger': return handleDoomScrollTrigger(msg, sender);
+    case 'doomscroll-classify': return handleDoomScrollClassify(msg.title, msg.url, msg.urlType);
     default: return { error: 'Unknown message type' };
   }
 }
@@ -683,6 +893,139 @@ async function handleAiClassify(url, title) {
     return { success: true, ...result };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+// ── Doomscroll Handlers ────────────────────────────────────────────────────────
+/**
+ * Handles behavioral escalation sent by content/doomscroll.js.
+ * Decision tree:
+ *   Strict mode OR doomScore > 1.0  → immediate hard block
+ *   Easy mode                        → 4-level escalation ladder
+ *
+ * Blocking is ROUTE-SPECIFIC. Full youtube.com is never blocked.
+ */
+async function handleDoomScrollTrigger(msg, sender) {
+  const tabId = sender?.tab?.id;
+  const url = msg.url;
+  const metrics = msg.metrics || {};
+  const urlType = msg.urlType || 'shorts'; // 'shorts' | 'watch'
+
+  if (!tabId || !url) return { success: false, error: 'Missing tab context' };
+
+  const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
+  const ws = data.activeWorkspaceId ? (data.workspaces || {})[data.activeWorkspaceId] : null;
+  const focusMode = ws?.focusMode || 'easy';
+
+  // Strict mode or very high score → hard block immediately
+  if (focusMode === 'strict' || (metrics.doomScore || 0) > 1.0) {
+    console.log('[FlowState Doomscroll] Hard block tab', tabId, '| score:', metrics.doomScore);
+    const encoded = encodeURIComponent(url);
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`pages/blocked.html?url=${encoded}&tabId=${tabId}&type=doomscroll`) });
+    _doomScrollLevels.delete(tabId);
+    return { success: true };
+  }
+
+  // Easy mode: 4-level escalation ladder
+  const entry = _doomScrollLevels.get(tabId) || { level: 0, lastTrigger: 0 };
+  const ONE_HOUR = 60 * 60 * 1000;
+  if (Date.now() - entry.lastTrigger > ONE_HOUR) entry.level = 0;
+
+  entry.level = Math.min(entry.level + 1, 4);
+  entry.lastTrigger = Date.now();
+  _doomScrollLevels.set(tabId, entry);
+
+  console.log('[FlowState Doomscroll] Easy escalation level', entry.level, 'tab', tabId, urlType);
+
+  const encoded = encodeURIComponent(url);
+
+  if (entry.level === 1) {
+    // Level 1: Subtle toast overlay (injected into the page)
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: _doomscrollOverlay, args: [1] });
+    } catch (e) { console.warn('[FlowState Doomscroll] Overlay error:', e.message); }
+    return { success: true, softReset: true }; // allow re-trigger after 10s
+
+  } else if (entry.level === 2) {
+    // Level 2: 3-second countdown overlay
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, func: _doomscrollOverlay, args: [2] });
+    } catch (e) { console.warn('[FlowState Doomscroll] Overlay error:', e.message); }
+    return { success: true, softReset: true };
+
+  } else if (entry.level === 3) {
+    // Level 3: Intent confirmation page
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`pages/ai-escalation.html?url=${encoded}&tabId=${tabId}&level=3&type=doomscroll`) });
+    return { success: true };
+
+  } else if (entry.level >= 4) {
+    // Level 4: Hard redirect to blocked.html
+    chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`pages/blocked.html?url=${encoded}&tabId=${tabId}&type=doomscroll`) });
+    _doomScrollLevels.delete(tabId);
+    return { success: true };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Injected into the YouTube tab via scripting.executeScript.
+ * MUST be self-contained — no closures, no external references.
+ */
+function _doomscrollOverlay(level) {
+  if (document.getElementById('fs-doomscroll-overlay')) return;
+  const o = document.createElement('div');
+  o.id = 'fs-doomscroll-overlay';
+  o.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:2147483647;background:rgba(10,10,10,0.92);color:#fff;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;padding:14px 24px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.5);display:flex;align-items:center;gap:12px;border:1px solid rgba(255,255,255,0.12);backdrop-filter:blur(8px);pointer-events:auto;user-select:none';
+  if (level === 1) {
+    o.innerHTML = '<span style="font-size:20px">⚠️</span><span>You\'ve been scrolling Shorts for a while. Take a break?</span><button id="fs-ds-ok" style="background:#6c63ff;border:none;color:#fff;padding:6px 14px;border-radius:8px;cursor:pointer;font-weight:700">Got it</button>';
+    document.body.appendChild(o);
+    document.getElementById('fs-ds-ok')?.addEventListener('click', () => o.remove());
+    setTimeout(() => o.remove(), 8000);
+  } else if (level === 2) {
+    let n = 3;
+    o.innerHTML = '<span style="font-size:20px">⏸️</span><span>Pausing for <strong id="fs-ds-n">3</strong>s — you\'re deep in Shorts.</span>';
+    document.body.appendChild(o);
+    const el = document.getElementById('fs-ds-n');
+    const t = setInterval(() => { n--; if (el) el.textContent = n; if (n <= 0) { clearInterval(t); o.remove(); } }, 1000);
+  }
+}
+
+/**
+ * Classify a Shorts/Watch video title for threshold adjustment.
+ * AI role: multiplier tuning ONLY — it never directly blocks.
+ *
+ *   Educational / Work-related → multiplier 1.25 (more lenient)
+ *   Entertainment / Social     → multiplier 0.80 (stricter)
+ *   Anything else              → multiplier 1.00 (neutral)
+ */
+async function handleDoomScrollClassify(title, url, urlType) {
+  try {
+    const { hfApiKey } = await chrome.storage.local.get('hfApiKey');
+    if (!hfApiKey) return { multiplier: 1.0, category: null };
+
+    const host = url ? new URL(url).hostname : 'youtube.com';
+    const text = title ? `${host} — ${title}` : host;
+
+    const result = await callBartMNLI(text, [
+      'educational content',
+      'entertainment',
+      'social media',
+      'work related',
+    ], hfApiKey);
+
+    const category = result.labels[0];
+    console.log('[FlowState Doomscroll] AI classify:', category,
+      `(${(result.scores[0] * 100).toFixed(1)}%) urlType:`, urlType);
+
+    let multiplier = 1.0;
+    if (category === 'educational content' || category === 'work related') multiplier = 1.25;
+    else if (category === 'entertainment' || category === 'social media') multiplier = 0.80;
+
+    return { multiplier, category };
+  } catch (err) {
+    console.warn('[FlowState Doomscroll] Classify error:', err.message);
+    return { multiplier: 1.0, category: null }; // neutral fallback
   }
 }
 

@@ -36,7 +36,7 @@ $blockedUrl.textContent = domain || url || 'Unknown site';
 // ── Listen for focus mode changes ──────────────────────────────
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local') return;
-  
+
   // Handle AI Smart Blocking being disabled
   if (changes.aiEnabled) {
     const aiEnabled = changes.aiEnabled.newValue;
@@ -47,16 +47,16 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
       return;
     }
   }
-  
+
   // Handle focus mode changes
   if (changes.workspaces) {
     try {
       const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
       if (!data.activeWorkspaceId) return;
-      
+
       const ws = data.workspaces?.[data.activeWorkspaceId];
       if (!ws) return;
-      
+
       // If focus mode changed to easy, reload as soft-redirect page (only for manual blocks)
       if (ws.focusMode === 'easy' && blockType === 'manual') {
         console.log('[FlowState] Focus mode changed to easy, switching page');
@@ -75,29 +75,29 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 async function handleTempBlock() {
   // Hide intent unlock section
   document.getElementById('unlock-section').style.display = 'none';
-  
+
   // Update page message
   var $pageMsg = document.querySelector('.page-msg');
   $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
-  
+
   // Get temp block data
   var data = await chrome.storage.local.get('aiTempBlocks');
   var tempBlocks = data.aiTempBlocks || {};
   var block = tempBlocks[domain];
-  
+
   if (!block || block.blockedUntil <= Date.now()) {
     // Block expired, allow access
     window.location.href = url;
     return;
   }
-  
+
   // Show remaining time
   var remaining = block.blockedUntil - Date.now();
   var msg = document.createElement('p');
   msg.style.cssText = 'text-align: center; font-size: 18px; margin-top: 20px; color: var(--primary);';
   msg.id = 'temp-block-timer';
   document.querySelector('.page-center').appendChild(msg);
-  
+
   function updateTimer() {
     var now = Date.now();
     if (now >= block.blockedUntil) {
@@ -105,15 +105,15 @@ async function handleTempBlock() {
       setTimeout(() => { window.location.href = url; }, 1000);
       return;
     }
-    
+
     var remain = block.blockedUntil - now;
     var minutes = Math.floor(remain / 60000);
     var seconds = Math.floor((remain % 60000) / 1000);
     msg.textContent = `⏱️ Unblocks in ${minutes}:${seconds.toString().padStart(2, '0')}`;
-    
+
     setTimeout(updateTimer, 1000);
   }
-  
+
   updateTimer();
 }
 
@@ -122,7 +122,7 @@ async function handleTempBlock() {
   // Update UI based on block type
   var $pageTitle = document.getElementById('page-title');
   var $pageMsg = document.getElementById('page-msg');
-  
+
   if (blockType === 'ai') {
     $pageTitle.textContent = 'AI Detected Distraction';
     $pageMsg.textContent = 'AI classified this site as potentially distracting.';
@@ -130,7 +130,7 @@ async function handleTempBlock() {
     $pageTitle.textContent = 'Temporarily Blocked';
     $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
   }
-  
+
   // Handle temporary AI block
   if (blockType === 'ai-temp') {
     await handleTempBlock();
@@ -259,3 +259,22 @@ $btnUnlock.addEventListener('click', async function () {
     $btnUnlock.textContent = 'Error: ' + err.message;
   }
 });
+
+// ── "Take me somewhere safe" button ────────────────────────────
+// Navigates to the safe root of the blocked domain.
+// e.g. blocked on youtube.com/shorts → goes to youtube.com/ (whitelisted safe path)
+document.getElementById('btn-go-safe').addEventListener('click', function () {
+  try {
+    // Go to the homepage of the blocked domain — always a safe, allowed route
+    var safeUrl = new URL(url).origin + '/';
+    window.location.href = safeUrl;
+  } catch (e) {
+    // Fallback: go back in history, or open new tab
+    if (history.length > 1) {
+      history.back();
+    } else {
+      window.location.href = 'chrome://newtab';
+    }
+  }
+});
+
