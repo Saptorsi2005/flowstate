@@ -124,23 +124,31 @@ document.getElementById('btn-stay').addEventListener('click', async function () 
       }
     }
 
-    // ── 2. Fallback: find any non-blocked tab ───────────────────
+    // ── 2. Fallback: find most-recently-used non-blocked tab ─────
+    // Sort by lastAccessed DESC — this is the key fix.
+    // tabs.find() returns the leftmost tab by index (wrong).
+    // We want the tab the user was most recently active on.
     const tabs = await chrome.tabs.query({ currentWindow: true });
     const currentTab = await chrome.tabs.getCurrent();
 
     console.log('[FlowState] Fallback tab search. Current tab:', currentTab?.id, 'Total tabs:', tabs.length);
 
-    const targetTab = tabs.find(t =>
-      t.id !== currentTab?.id &&
-      !t.url.startsWith('chrome-extension://') &&
-      !t.url.includes('soft-redirect.html') &&
-      !t.url.includes('blocked.html') &&
-      !t.url.includes('ai-escalation.html') &&
-      !isUrlBlocked(t.url)
-    );
+    // Filter to valid candidates, then sort by most recently accessed
+    const candidates = tabs
+      .filter(t =>
+        t.id !== currentTab?.id &&
+        !t.url.startsWith('chrome-extension://') &&
+        !t.url.includes('soft-redirect.html') &&
+        !t.url.includes('blocked.html') &&
+        !t.url.includes('ai-escalation.html') &&
+        !isUrlBlocked(t.url)
+      )
+      .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
+
+    const targetTab = candidates[0] ?? null;
 
     if (targetTab) {
-      console.log('[FlowState] Switching to fallback tab:', targetTab.id, targetTab.url);
+      console.log('[FlowState] Switching to most-recent non-blocked tab:', targetTab.id, targetTab.url);
       await chrome.tabs.update(targetTab.id, { active: true });
     } else {
       console.log('[FlowState] No suitable tab found, opening new tab');

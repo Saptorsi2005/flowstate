@@ -12,6 +12,8 @@
  *   6. Tab removal cleanup
  */
 
+import { initSyncListener } from "../utils/sync.js";
+
 const HF_API_URL =
   'https://router.huggingface.co/hf-inference/models/facebook/bart-large-mnli';
 
@@ -702,3 +704,5 @@ async function handleUnlock(domain, tabId) {
     return { success: false, error: err.message };
   }
 }
+
+initSyncListener();
