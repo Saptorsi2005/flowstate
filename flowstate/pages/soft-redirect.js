@@ -102,6 +102,27 @@ document.getElementById('btn-stay').addEventListener('click', async function () 
       } catch { return false; }
     }
 
+    // ── 0. Try to return to workspace origin tab ────────────
+    try {
+      const { activeFocusSession } = await chrome.storage.local.get('activeFocusSession');
+      if (activeFocusSession && activeFocusSession.originTabId) {
+        const originId = activeFocusSession.originTabId;
+        const originTab = await chrome.tabs.get(originId);
+
+        if (originTab &&
+          !isUrlBlocked(originTab.url) &&
+          !originTab.url.includes('soft-redirect.html') &&
+          !originTab.url.includes('blocked.html') &&
+          !originTab.url.includes('ai-escalation.html')) {
+          console.log('[FlowState] Returning to workspace origin tab:', originId, originTab.url);
+          await chrome.tabs.update(originId, { active: true });
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('[FlowState] Origin tab', e.message, 'falling back to prevTabId');
+    }
+
     // ── 1. Try to return to the exact previous tab ──────────────
     // Validate against CURRENT domain list — allowed domains may have changed
     if (prevTabId !== null) {
@@ -115,55 +136,33 @@ document.getElementById('btn-stay').addEventListener('click', async function () 
           console.log('[FlowState] Returning to previous tab:', prevTabId, prevTab.url);
           await chrome.tabs.update(prevTabId, { active: true });
           return;
-        } else {
-          console.log('[FlowState] Previous tab is now blocked or a redirect page, falling back to search');
         }
       } catch (e) {
-        // Tab no longer exists — fall through to search below
-        console.log('[FlowState] Previous tab', prevTabId, 'no longer exists, falling back to search');
+        console.log('[FlowState] Previous tab', prevTabId, 'no longer exists, falling back to history');
       }
     }
 
-    // ── 2. Fallback: find most-recently-used non-blocked tab ─────
-    // Sort by lastAccessed DESC — this is the key fix.
-    // tabs.find() returns the leftmost tab by index (wrong).
-    // We want the tab the user was most recently active on.
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const currentTab = await chrome.tabs.getCurrent();
+    // ── 2. Fallback: Go back in history or new tab ─────────────
+    console.log('[FlowState] Going back in history. Length:', window.history.length);
 
-    console.log('[FlowState] Fallback tab search. Current tab:', currentTab?.id, 'Total tabs:', tabs.length);
-
-    // Filter to valid candidates, then sort by most recently accessed
-    const candidates = tabs
-      .filter(t =>
-        t.id !== currentTab?.id &&
-        !t.url.startsWith('chrome-extension://') &&
-        !t.url.includes('soft-redirect.html') &&
-        !t.url.includes('blocked.html') &&
-        !t.url.includes('ai-escalation.html') &&
-        !isUrlBlocked(t.url)
-      )
-      .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
-
-    const targetTab = candidates[0] ?? null;
-
-    if (targetTab) {
-      console.log('[FlowState] Switching to most-recent non-blocked tab:', targetTab.id, targetTab.url);
-      await chrome.tabs.update(targetTab.id, { active: true });
+    // If we have history before the distraction URL (length > 2)
+    // History stack when typing in a new tab: [distraction.com, soft-redirect.html] (length 2)
+    // We want to go back PAST the distraction, so we need at least length 3.
+    if (window.history.length > 2) {
+      window.history.go(-2); // Go back past the distraction URL
     } else {
-      console.log('[FlowState] No suitable tab found, opening new tab');
-      await chrome.tabs.create({ url: 'chrome://newtab', active: true });
+      // If no valid safe history, safely navigate away
+      const currentTab = await chrome.tabs.getCurrent();
+      await chrome.tabs.update(currentTab.id, { url: 'chrome://newtab' });
     }
   } catch (e) {
     console.error('[FlowState] Error in Stay Focused:', e);
-    try {
-      await chrome.tabs.create({ url: 'chrome://newtab', active: true });
-    } catch (err) {
-      console.error('[FlowState] Failed to create new tab:', err);
-    }
+    const currentTab = await chrome.tabs.getCurrent();
+    if (currentTab) await chrome.tabs.update(currentTab.id, { url: 'chrome://newtab' });
   }
 });
 
+// ── Continue Anyway Handler (Easy Mode Only) ───────────────────
 document.getElementById('btn-continue').addEventListener('click', async function () {
   console.log('[FlowState] Continue Anyway clicked');
   // Double-check we're not in strict mode

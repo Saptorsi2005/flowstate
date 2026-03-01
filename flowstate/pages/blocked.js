@@ -1,48 +1,62 @@
 /**
- * blocked.js — Strict Mode block page with AI-Powered Intent Unlock
+ * blocked.js — Site Block Page
  *
- * Flow:
- *   1. User types reason for needing access
- *   2. AI (bart-large-mnli) scores the reason
- *   3. If approved → show countdown → unlock
- *   4. If denied → show rejection message, let them retry
+ * Strict Mode: Hard block with "Stay Focused" button only
+ * Easy Mode: Warning with "Stay Focused" + "Continue Anyway" buttons
  *
- * Falls back to plain countdown if no API key is set.
+ * AI system removed — clean tab restoration logic only.
  */
 
-var params = new URLSearchParams(window.location.search);
-var url = params.get('url') ? decodeURIComponent(params.get('url')) : null;
-var tabId = params.get('tabId') ? parseInt(params.get('tabId'), 10) : null;
-var blockType = params.get('type') || 'manual'; // 'manual', 'ai', 'ai-temp'
-var DURATION = 15; // seconds
+// ── Parse URL Parameters ───────────────────────────────────────
+const params = new URLSearchParams(window.location.search);
+const url = params.get('url') ? decodeURIComponent(params.get('url')) : null;
+const tabId = params.get('tabId') ? parseInt(params.get('tabId'), 10) : null;
+const prevTabId = params.get('prevTabId') ? parseInt(params.get('prevTabId'), 10) : null;
+const focusMode = params.get('mode') || 'strict';
+const blockType = params.get('type') || 'manual';
 
-var $blockedUrl = document.getElementById('blocked-url');
-var $intentSection = document.getElementById('intent-section');
-var $intentInput = document.getElementById('intent-input');
-var $btnCheckIntent = document.getElementById('btn-check-intent');
-var $intentStatus = document.getElementById('intent-status');
-var $countdownSection = document.getElementById('countdown-section');
-var $countdown = document.getElementById('countdown');
-var $btnUnlock = document.getElementById('btn-unlock');
+// ── DOM Elements ───────────────────────────────────────────────
+const $blockedUrl = document.getElementById('blocked-url');
+const $pageTitle = document.getElementById('page-title');
+const $pageMsg = document.getElementById('page-msg');
+const $btnStay = document.getElementById('btn-stay');
+const $btnContinue = document.getElementById('btn-continue');
 
-var domain = '';
-try { domain = new URL(url).hostname; } catch (e) { }
+// ── Initialize Page ────────────────────────────────────────────
+let domain = '';
+try {
+  domain = new URL(url).hostname;
+} catch (e) {
+  domain = url || 'Unknown site';
+}
 
-$blockedUrl.textContent = domain || url || 'Unknown site';
+$blockedUrl.textContent = domain;
 
-// Reload detection temporarily disabled to prevent false positives
-// Extension reload will naturally invalidate pages
+// Update UI based on block type
+if (blockType === 'ai' || blockType === 'ai-temp') {
+  $pageTitle.textContent = 'AI Detected Distraction';
+  $pageMsg.textContent = 'This site was flagged as potentially distracting.';
+}
 
-// ── Listen for focus mode changes ──────────────────────────────
+// Configure buttons based on focus mode
+if (focusMode === 'strict') {
+  // Strict mode: only "Stay Focused" button
+  $btnContinue.style.display = 'none';
+  $pageMsg.textContent = 'This site is blocked in strict mode.';
+} else {
+  // Easy mode: show both buttons
+  $btnContinue.style.display = 'inline-block';
+}
+
+// ── Listen for Focus Mode Changes ──────────────────────────────
 chrome.storage.onChanged.addListener(async (changes, area) => {
   if (area !== 'local') return;
 
   // Handle AI Smart Blocking being disabled
   if (changes.aiEnabled) {
     const aiEnabled = changes.aiEnabled.newValue;
-    // If AI was disabled and this is an AI-blocked page, unblock it
-    if (!aiEnabled && (blockType === 'ai' || blockType === 'ai-block')) {
-      console.log('[FlowState] AI Smart Blocking disabled, navigating to original URL');
+    if (!aiEnabled && (blockType === 'ai' || blockType === 'ai-temp')) {
+      console.log('[FlowState] AI disabled, navigating to original URL');
       window.location.href = url || 'chrome://newtab';
       return;
     }
@@ -57,12 +71,13 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
       const ws = data.workspaces?.[data.activeWorkspaceId];
       if (!ws) return;
 
-      // If focus mode changed to easy, reload as soft-redirect page (only for manual blocks)
-      if (ws.focusMode === 'easy' && blockType === 'manual') {
-        console.log('[FlowState] Focus mode changed to easy, switching page');
+      // If mode changed, reload page with new mode
+      if (ws.focusMode !== focusMode) {
+        console.log('[FlowState] Focus mode changed to', ws.focusMode);
         const encoded = encodeURIComponent(url);
+        const prevParam = prevTabId !== null ? `&prevTabId=${prevTabId}` : '';
         window.location.href = chrome.runtime.getURL(
-          `pages/soft-redirect.html?url=${encoded}&tabId=${tabId}&mode=easy`
+          `pages/blocked.html?url=${encoded}&tabId=${tabId}&mode=${ws.focusMode}${prevParam}`
         );
       }
     } catch (e) {
@@ -73,17 +88,13 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 
 // ── Handle Temporary AI Block ──────────────────────────────────
 async function handleTempBlock() {
-  // Hide intent unlock section
-  document.getElementById('unlock-section').style.display = 'none';
-
-  // Update page message
-  var $pageMsg = document.querySelector('.page-msg');
+  $btnStay.style.display = 'none';
+  $btnContinue.style.display = 'none';
   $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
 
-  // Get temp block data
-  var data = await chrome.storage.local.get('aiTempBlocks');
-  var tempBlocks = data.aiTempBlocks || {};
-  var block = tempBlocks[domain];
+  const data = await chrome.storage.local.get('aiTempBlocks');
+  const tempBlocks = data.aiTempBlocks || {};
+  const block = tempBlocks[domain];
 
   if (!block || block.blockedUntil <= Date.now()) {
     // Block expired, allow access
@@ -92,23 +103,22 @@ async function handleTempBlock() {
   }
 
   // Show remaining time
-  var remaining = block.blockedUntil - Date.now();
-  var msg = document.createElement('p');
+  const msg = document.createElement('p');
   msg.style.cssText = 'text-align: center; font-size: 18px; margin-top: 20px; color: var(--primary);';
   msg.id = 'temp-block-timer';
   document.querySelector('.page-center').appendChild(msg);
 
   function updateTimer() {
-    var now = Date.now();
+    const now = Date.now();
     if (now >= block.blockedUntil) {
       msg.textContent = '✓ Block expired! Redirecting...';
       setTimeout(() => { window.location.href = url; }, 1000);
       return;
     }
 
-    var remain = block.blockedUntil - now;
-    var minutes = Math.floor(remain / 60000);
-    var seconds = Math.floor((remain % 60000) / 1000);
+    const remain = block.blockedUntil - now;
+    const minutes = Math.floor(remain / 60000);
+    const seconds = Math.floor((remain % 60000) / 1000);
     msg.textContent = `⏱️ Unblocks in ${minutes}:${seconds.toString().padStart(2, '0')}`;
 
     setTimeout(updateTimer, 1000);
@@ -117,164 +127,132 @@ async function handleTempBlock() {
   updateTimer();
 }
 
-// Check if AI key is available; if not, skip intent step and show direct countdown
-(async function init() {
-  // Update UI based on block type
-  var $pageTitle = document.getElementById('page-title');
-  var $pageMsg = document.getElementById('page-msg');
+// Check if this is a temporary AI block
+if (blockType === 'ai-temp') {
+  handleTempBlock();
+}
 
-  if (blockType === 'ai') {
-    $pageTitle.textContent = 'AI Detected Distraction';
-    $pageMsg.textContent = 'AI classified this site as potentially distracting.';
-  } else if (blockType === 'ai-temp') {
-    $pageTitle.textContent = 'Temporarily Blocked';
-    $pageMsg.textContent = 'AI detected this as highly distracting. Temporarily blocked.';
-  }
-
-  // Handle temporary AI block
-  if (blockType === 'ai-temp') {
-    await handleTempBlock();
-    return;
-  }
-
-  var data = await chrome.storage.local.get(['hfApiKey', 'unlockCountdowns']);
-  var key = data.hfApiKey;
-  var countdowns = data.unlockCountdowns || {};
-  var entry = countdowns[String(tabId)];
-
-  if (!key) {
-    // No AI key → use original plain countdown
-    $intentSection.style.display = 'none';
-    $countdownSection.classList.remove('hidden');
-    if (!entry || entry.url !== url) {
-      entry = { url: url, domain: domain, startedAt: Date.now(), duration: DURATION * 1000 };
-      countdowns[String(tabId)] = entry;
-      await chrome.storage.local.set({ unlockCountdowns: countdowns });
-    }
-    startCountdown(entry);
-  }
-  // else: wait for user to enter intent and click Check
-})();
-
-// ── AI Intent Check ────────────────────────────────────────────
-$btnCheckIntent.addEventListener('click', async function () {
-  var reason = $intentInput.value.trim();
-  if (!reason) {
-    $intentStatus.textContent = 'Please describe why you need access.';
-    $intentStatus.className = 'intent-status intent-deny';
-    return;
-  }
-
-  $btnCheckIntent.disabled = true;
-  $btnCheckIntent.textContent = '✦ Asking AI…';
-  $intentStatus.className = 'intent-status hidden';
+// ── Helper: Check if URL is blocked ────────────────────────────
+async function isUrlBlocked(checkUrl) {
+  if (!checkUrl) return false;
+  if (checkUrl.startsWith('chrome-extension://') ||
+    checkUrl.startsWith('chrome://') ||
+    checkUrl.startsWith('about:')) return false;
 
   try {
-    var res = await chrome.runtime.sendMessage({
-      type: 'ai-score-intent',
-      reason: reason,
+    const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
+    const ws = data.workspaces?.[data.activeWorkspaceId];
+    if (!ws) return false;
+
+    const blockedDomains = ws.blockedDomains || [];
+    const allowedDomains = ws.allowedDomains || [];
+    const d = new URL(checkUrl).hostname.replace(/^www\./, '');
+
+    // Explicitly allowed → never blocked
+    const isAllowed = allowedDomains.some(a => {
+      const ca = a.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
+      return d.includes(ca) || ca.includes(d);
     });
+    if (isAllowed) return false;
 
-    if (!res) throw new Error('No response from background.');
-
-    if (!res.success) {
-      // API key issue or error — fall through with plain countdown
-      $intentStatus.textContent = '⚠ AI unavailable. Access granted after countdown.';
-      $intentStatus.className = 'intent-status intent-warn';
-      await showCountdown();
-      return;
-    }
-
-    var pct = Math.round(res.score * 100);
-
-    if (res.allowed) {
-      // ✅ Approved
-      $intentStatus.textContent = `✓ Looks legit (${pct}% — "${res.label}"). Access granted!`;
-      $intentStatus.className = 'intent-status intent-allow';
-      setTimeout(async () => { await showCountdown(); }, 600);
-    } else {
-      // ❌ Denied
-      $intentStatus.textContent =
-        `✗ That doesn't sound work-related (${pct}% — "${res.label}"). Try again with a clearer reason.`;
-      $intentStatus.className = 'intent-status intent-deny';
-      $btnCheckIntent.disabled = false;
-      $btnCheckIntent.textContent = '✦ Check with AI';
-    }
-
-  } catch (err) {
-    $intentStatus.textContent = '⚠ Error: ' + err.message + '. Granting access via countdown.';
-    $intentStatus.className = 'intent-status intent-warn';
-    await showCountdown();
+    // In blocked list → blocked
+    return blockedDomains.some(blocked => {
+      const cleanBlocked = blocked.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
+      return d.includes(cleanBlocked) || cleanBlocked.includes(d);
+    });
+  } catch {
+    return false;
   }
-});
-
-async function showCountdown() {
-  $intentSection.style.display = 'none';
-  $countdownSection.classList.remove('hidden');
-
-  var key = String(tabId);
-  var data = await chrome.storage.local.get('unlockCountdowns');
-  var countdowns = data.unlockCountdowns || {};
-  var entry = countdowns[key];
-
-  if (!entry || entry.url !== url) {
-    entry = { url: url, domain: domain, startedAt: Date.now(), duration: DURATION * 1000 };
-    countdowns[key] = entry;
-    await chrome.storage.local.set({ unlockCountdowns: countdowns });
-  }
-  startCountdown(entry);
 }
 
-function startCountdown(entry) {
-  function tick() {
-    var elapsed = Date.now() - entry.startedAt;
-    var remaining = Math.max(0, entry.duration - elapsed);
-    var secs = Math.ceil(remaining / 1000);
-    $countdown.textContent = secs;
+// ── Stay Focused Handler ───────────────────────────────────────
+async function handleStayFocused() {
+  console.log('[FlowState] Stay Focused clicked, prevTabId:', prevTabId);
 
-    if (remaining <= 0) {
-      $countdown.textContent = '✓';
-      $btnUnlock.disabled = false;
-      $btnUnlock.classList.add('btn-ready');
-      return;
-    }
-    setTimeout(tick, 200);
-  }
-  tick();
-}
-
-// ── Unlock handler ─────────────────────────────────────────────
-$btnUnlock.addEventListener('click', async function () {
-  if ($btnUnlock.disabled) return;
-  $btnUnlock.disabled = true;
-  $btnUnlock.textContent = 'Unlocking…';
   try {
+    // ── 0. Try to return to workspace origin tab ────────────
+    try {
+      const { activeFocusSession } = await chrome.storage.local.get('activeFocusSession');
+      if (activeFocusSession && activeFocusSession.originTabId) {
+        const originId = activeFocusSession.originTabId;
+        const originTab = await chrome.tabs.get(originId);
+        const blocked = await isUrlBlocked(originTab.url);
+
+        if (originTab &&
+          !blocked &&
+          !originTab.url.includes('soft-redirect.html') &&
+          !originTab.url.includes('blocked.html') &&
+          !originTab.url.includes('ai-escalation.html')) {
+          console.log('[FlowState] Returning to workspace origin tab:', originId, originTab.url);
+          await chrome.tabs.update(originId, { active: true });
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('[FlowState] Origin tab', e.message, 'falling back to prevTabId');
+    }
+
+    // ── 1. Try to return to the exact previous tab ──────────
+    if (prevTabId !== null) {
+      try {
+        const prevTab = await chrome.tabs.get(prevTabId);
+        const blocked = await isUrlBlocked(prevTab.url);
+
+        if (prevTab &&
+          !blocked &&
+          !prevTab.url.includes('soft-redirect.html') &&
+          !prevTab.url.includes('blocked.html') &&
+          !prevTab.url.includes('ai-escalation.html')) {
+          console.log('[FlowState] Returning to previous tab:', prevTabId, prevTab.url);
+          await chrome.tabs.update(prevTabId, { active: true });
+          return;
+        }
+      } catch (e) {
+        console.log('[FlowState] Previous tab', prevTabId, 'no longer exists, falling back to history');
+      }
+    }
+
+    // ── 2. Fallback: Go back in history or new tab ─────────────
+    console.log('[FlowState] Going back in history. Length:', window.history.length);
+
+    // If we have history before the distraction URL (length > 2)
+    // History stack when typing in a new tab: [distraction.com, blocked.html] (length 2)
+    // We want to go back PAST the distraction, so we need at least length 3.
+    if (window.history.length > 2) {
+      window.history.go(-2); // Go back past the distraction URL
+    } else {
+      // If no valid safe history, safely navigate away
+      const currentTab = await chrome.tabs.getCurrent();
+      await chrome.tabs.update(currentTab.id, { url: 'chrome://newtab' });
+    }
+  } catch (e) {
+    console.error('[FlowState] Error in Stay Focused:', e);
+    const currentTab = await chrome.tabs.getCurrent();
+    if (currentTab) await chrome.tabs.update(currentTab.id, { url: 'chrome://newtab' });
+  }
+}
+
+// ── Continue Anyway Handler (Easy Mode Only) ───────────────────
+async function handleContinueAnyway() {
+  console.log('[FlowState] Continue Anyway clicked');
+
+  try {
+    // Request temporary unlock from background
     await chrome.runtime.sendMessage({
       type: 'request-unlock',
       domain: domain,
       tabId: tabId,
     });
+
+    // Navigate to the original URL
     window.location.href = url;
   } catch (err) {
-    $btnUnlock.textContent = 'Error: ' + err.message;
+    console.error('[FlowState] Error in Continue Anyway:', err);
+    alert('Error: ' + err.message);
   }
-});
+}
 
-// ── "Take me somewhere safe" button ────────────────────────────
-// Navigates to the safe root of the blocked domain.
-// e.g. blocked on youtube.com/shorts → goes to youtube.com/ (whitelisted safe path)
-document.getElementById('btn-go-safe').addEventListener('click', function () {
-  try {
-    // Go to the homepage of the blocked domain — always a safe, allowed route
-    var safeUrl = new URL(url).origin + '/';
-    window.location.href = safeUrl;
-  } catch (e) {
-    // Fallback: go back in history, or open new tab
-    if (history.length > 1) {
-      history.back();
-    } else {
-      window.location.href = 'chrome://newtab';
-    }
-  }
-});
+// ── Event Listeners ────────────────────────────────────────────
+$btnStay.addEventListener('click', handleStayFocused);
+$btnContinue.addEventListener('click', handleContinueAnyway);
 
