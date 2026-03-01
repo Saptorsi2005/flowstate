@@ -692,3 +692,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
   stroke-linecap: round;
   transition: stroke-dashoffset 1s linear;
 }
+/* ============================ LOADING SPINNER ANIMATION ============================ */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+

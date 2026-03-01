@@ -1,6 +1,46 @@
-import { Link } from "react-router-dom";
+import { useAuth0 } from "@auth0/auth0-react";
+import { useNavigate } from "react-router-dom";
+import { useEffect } from "react";
 
 export default function Landing() {
+    const { loginWithRedirect, isAuthenticated, isLoading } = useAuth0();
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            navigate("/home");
+        }
+    }, [isAuthenticated, navigate]);
+
+    if (isLoading) {
+        return (
+            <div
+                style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    height: "100vh",
+                    background: "linear-gradient(135deg, #09090b 0%, #18181b 100%)",
+                }}
+            >
+                <div style={{ textAlign: "center" }}>
+                    <div
+                        style={{
+                            width: 40,
+                            height: 40,
+                            border: "3px solid rgba(34,211,238,0.3)",
+                            borderTopColor: "#22d3ee",
+                            borderRadius: "50%",
+                            animation: "spin 1s linear infinite",
+                            margin: "0 auto 16px",
+                        }}
+                    />
+                    <p style={{ fontSize: 14, color: "#71717a" }}>Loading...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div
             className="glass-card anim-fade-in-up"
@@ -20,7 +60,7 @@ export default function Landing() {
                     marginBottom: 12,
                 }}
             >
-                FocusFlow
+                FlowState
             </h1>
 
             <p
@@ -42,8 +82,8 @@ export default function Landing() {
                     gap: 16,
                 }}
             >
-                <Link
-                    to="/login"
+                <button
+                    onClick={() => loginWithRedirect()}
                     className="btn-primary"
                     style={{
                         padding: "14px 20px",
@@ -51,20 +91,8 @@ export default function Landing() {
                         justifyContent: "center",
                     }}
                 >
-                    Login
-                </Link>
-
-                <Link
-                    to="/signup"
-                    className="btn-secondary"
-                    style={{
-                        padding: "14px 20px",
-                        fontSize: 15,
-                        justifyContent: "center",
-                    }}
-                >
-                    Create Account
-                </Link>
+                    Login / Sign Up
+                </button>
             </div>
 
             <div

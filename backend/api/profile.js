@@ -1,7 +1,7 @@
 /**
- * api/dashboard.js — GET /api/dashboard
+ * api/profile.js — GET /api/profile
  *
- * Returns user, workspaces, and focus score stats for the React dashboard.
+ * Returns user profile data with aggregated stats.
  */
 
 import { verifyRequest, AuthError } from '../lib/auth.js';
@@ -84,7 +84,7 @@ export default async function handler(req, res) {
   try {
     await initDB();
   } catch (err) {
-    console.error('[dashboard] initDB failed:', err.message);
+    console.error('[profile] initDB failed:', err.message);
     return res.status(500).json({ error: 'Database initialization failed' });
   }
 
@@ -98,8 +98,8 @@ export default async function handler(req, res) {
   }
 
   const rl = checkRateLimit(
-    rateLimitKey(identity.sub, 'dashboard'),
-    60,
+    rateLimitKey(identity.sub, 'profile'),
+    30,
     60_000
   );
 
@@ -122,58 +122,22 @@ export default async function handler(req, res) {
     `;
 
     if (userRows.length === 0) {
-      return res.status(200).json({
-        user: null,
-        workspaces: [],
-        weeklyData: [],
-        stats: {
-          totalWorkspaces: 0,
-          totalSavedTabs: 0,
-          totalDeepWorkMinutes: 0,
-          todayFocusScore: 0,
-          weeklyAverageFocusScore: 0,
-          totalBlockedAttemptsToday: 0,
-          currentStreak: 0,
-          completionRate: 0,
-        },
-      });
+      return res.status(404).json({ error: 'User not found' });
     }
 
     const user = userRows[0];
 
-    /* ── Workspaces ─────────────────────────────────────── */
+    /* ── Total Workspaces ───────────────────────────────── */
 
-    const workspaces = await sql`
-      SELECT id, name, focus_mode, blocked_domains,
-             allowed_domains, todos, saved_tabs_count,
-             created_at
+    const workspaceCount = await sql`
+      SELECT COUNT(*) as count
       FROM workspaces
       WHERE user_id = ${userId}
-      ORDER BY created_at ASC
     `;
 
-    const totalSavedTabs = workspaces.reduce(
-      (s, w) => s + (w.saved_tabs_count ?? 0),
-      0
-    );
+    const totalWorkspaces = Number(workspaceCount[0]?.count ?? 0);
 
-    /* ── Completion Rate ───────────────────────────────── */
-
-    let totalTodos = 0;
-    let completedTodos = 0;
-
-    workspaces.forEach((ws) => {
-      const todos = ws.todos || [];
-      totalTodos += todos.length;
-      completedTodos += todos.filter((t) => t.completed).length;
-    });
-
-    const completionRate =
-      totalTodos > 0
-        ? Math.round((completedTodos / totalTodos) * 100)
-        : 0;
-
-    /* ── Total Deep Work Minutes ───────────────────────── */
+    /* ── Total Deep Work Hours ─────────────────────────── */
 
     const deepWorkRows = await sql`
       SELECT COALESCE(SUM(deep_focus_minutes), 0) as total_minutes
@@ -181,107 +145,44 @@ export default async function handler(req, res) {
       WHERE user_id = ${userId}
     `;
 
-    const totalDeepWorkMinutes = Number(
-      deepWorkRows[0]?.total_minutes ?? 0
+    const totalDeepWorkHours = Math.round(
+      Number(deepWorkRows[0]?.total_minutes ?? 0) / 60
     );
 
-    /* ── Today Stats ───────────────────────────────────── */
+    /* ── Today's Focus Score ───────────────────────────── */
 
     const todayRows = await sql`
-      SELECT
-        COALESCE(SUM(focus_score), 0)       AS total_score,
-        COALESCE(SUM(blocked_attempts), 0)  AS total_blocked,
-        COUNT(*)                            AS session_count
+      SELECT COALESCE(AVG(focus_score), 0) as avg_score
       FROM focus_stats
       WHERE user_id = ${userId}
         AND date = CURRENT_DATE
     `;
 
-    const todayFocusScore =
-      todayRows[0]?.session_count > 0
-        ? Math.round(
-            Number(todayRows[0].total_score) /
-              Number(todayRows[0].session_count)
-          )
-        : 0;
-
-    const totalBlockedAttemptsToday = Number(
-      todayRows[0]?.total_blocked ?? 0
+    const todayFocusScore = Math.round(
+      Number(todayRows[0]?.avg_score ?? 0)
     );
-
-    /* ── Weekly Average ───────────────────────────────── */
-
-    const weeklyRows = await sql`
-      SELECT COALESCE(AVG(daily_avg), 0) AS weekly_avg
-      FROM (
-        SELECT date, AVG(focus_score) AS daily_avg
-        FROM focus_stats
-        WHERE user_id = ${userId}
-          AND date >= CURRENT_DATE - INTERVAL '6 days'
-        GROUP BY date
-      ) daily
-    `;
-
-    const weeklyAverageFocusScore = Math.round(
-      Number(weeklyRows[0]?.weekly_avg ?? 0)
-    );
-
-    /* ── Weekly Chart Data ────────────────────────────── */
-
-    const weeklyDataRows = await sql`
-      SELECT date,
-             COALESCE(AVG(focus_score), 0) as avg_score
-      FROM focus_stats
-      WHERE user_id = ${userId}
-        AND date >= CURRENT_DATE - INTERVAL '6 days'
-      GROUP BY date
-      ORDER BY date ASC
-    `;
-
-    const weeklyData = [];
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-
-      const dateStr = d.toISOString().split('T')[0];
-      const dayName = days[d.getDay()];
-
-      const found = weeklyDataRows.find(
-        (r) =>
-          new Date(r.date).toISOString().split('T')[0] === dateStr
-      );
-
-      weeklyData.push({
-        day: dayName,
-        value: found ? Math.round(Number(found.avg_score)) : 0,
-        date: dateStr,
-      });
-    }
 
     /* ── Current Streak ───────────────────────────────── */
 
     const currentStreak = await calculateStreak(sql, userId);
 
     return res.status(200).json({
-      user,
-      workspaces,
-      weeklyData,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        created_at: user.created_at,
+      },
       stats: {
-        totalWorkspaces: workspaces.length,
-        totalSavedTabs,
-        totalDeepWorkMinutes,
+        totalWorkspaces,
+        totalDeepWorkHours,
         todayFocusScore,
-        weeklyAverageFocusScore,
-        totalBlockedAttemptsToday,
         currentStreak,
-        completionRate,
       },
     });
 
   } catch (err) {
-    console.error('[dashboard] DB error:', err.message, err.stack);
+    console.error('[profile] DB error:', err.message, err.stack);
     return res.status(500).json({ error: 'Database error' });
   }
 }
