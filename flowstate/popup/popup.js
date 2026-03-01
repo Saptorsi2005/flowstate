@@ -353,6 +353,10 @@ const $todoInput = document.getElementById('todo-input');
 const $btnAddTodo = document.getElementById('btn-add-todo');
 const $todoProgressFill = document.getElementById('todo-progress-fill');
 const $todoProgressText = document.getElementById('todo-progress-text');
+const $pomodoroWorkMinutes = document.getElementById('pomodoro-work-minutes');
+const $pomodoroWorkSeconds = document.getElementById('pomodoro-work-seconds');
+const $pomodoroBreakMinutes = document.getElementById('pomodoro-break-minutes');
+const $pomodoroBreakSeconds = document.getElementById('pomodoro-break-seconds');
 const $btnActivate = document.getElementById('btn-activate');
 
 // ── Init (modules are deferred, so DOM is already ready) ───────
@@ -555,6 +559,12 @@ async function selectWorkspace(id) {
 
   // Saved tabs count
   $savedTabsCount.textContent = ws.savedTabs.length;
+
+  // Pomodoro timer settings (with defaults for backwards compatibility)
+  $pomodoroWorkMinutes.value = ws.pomodoroWorkMinutes ?? 25;
+  $pomodoroWorkSeconds.value = ws.pomodoroWorkSeconds ?? 0;
+  $pomodoroBreakMinutes.value = ws.pomodoroBreakMinutes ?? 5;
+  $pomodoroBreakSeconds.value = ws.pomodoroBreakSeconds ?? 0;
 
   // Todos
   renderTodos(ws);
@@ -906,6 +916,49 @@ function bindNewEvents() {
   // Focus mode toggles
   $btnModeEasy.addEventListener('click', () => setFocusMode('easy'));
   $btnModeStrict.addEventListener('click', () => setFocusMode('strict'));
+
+  // Pomodoro timer settings
+  const savePomodoroSettings = async () => {
+    if (!selectedWsId) return;
+    const ws = await getWorkspace(selectedWsId);
+    if (!ws) return;
+    
+    const workMin = parseInt($pomodoroWorkMinutes.value, 10);
+    const workSec = parseInt($pomodoroWorkSeconds.value, 10);
+    const breakMin = parseInt($pomodoroBreakMinutes.value, 10);
+    const breakSec = parseInt($pomodoroBreakSeconds.value, 10);
+    
+    // Validate and constrain values
+    ws.pomodoroWorkMinutes = Math.max(0, Math.min(180, isNaN(workMin) ? 25 : workMin));
+    ws.pomodoroWorkSeconds = Math.max(0, Math.min(59, isNaN(workSec) ? 0 : workSec));
+    ws.pomodoroBreakMinutes = Math.max(0, Math.min(60, isNaN(breakMin) ? 5 : breakMin));
+    ws.pomodoroBreakSeconds = Math.max(0, Math.min(59, isNaN(breakSec) ? 0 : breakSec));
+    
+    // Ensure at least 1 second total for each phase
+    const workTotal = ws.pomodoroWorkMinutes * 60 + ws.pomodoroWorkSeconds;
+    const breakTotal = ws.pomodoroBreakMinutes * 60 + ws.pomodoroBreakSeconds;
+    
+    if (workTotal < 1) {
+      ws.pomodoroWorkMinutes = 0;
+      ws.pomodoroWorkSeconds = 30;
+    }
+    if (breakTotal < 1) {
+      ws.pomodoroBreakMinutes = 0;
+      ws.pomodoroBreakSeconds = 30;
+    }
+    
+    await saveWorkspace(ws);
+    // Update inputs to show corrected values
+    $pomodoroWorkMinutes.value = ws.pomodoroWorkMinutes;
+    $pomodoroWorkSeconds.value = ws.pomodoroWorkSeconds;
+    $pomodoroBreakMinutes.value = ws.pomodoroBreakMinutes;
+    $pomodoroBreakSeconds.value = ws.pomodoroBreakSeconds;
+  };
+
+  $pomodoroWorkMinutes.addEventListener('change', savePomodoroSettings);
+  $pomodoroWorkSeconds.addEventListener('change', savePomodoroSettings);
+  $pomodoroBreakMinutes.addEventListener('change', savePomodoroSettings);
+  $pomodoroBreakSeconds.addEventListener('change', savePomodoroSettings);
 
   // Add blocked domain
   $btnAddBlocked.addEventListener('click', () => addDomain('blocked'));
@@ -1467,7 +1520,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // SECTION 5: POMODORO TIMER UI
 // ═══════════════════════════════════════════════════════════════
 
-import { formatPomodoroTime, arcProgress, WORK_MS, BREAK_MS } from '../utils/pomodoro.js';
+import { formatPomodoroTime, arcProgress, DEFAULT_POMODORO } from '../utils/pomodoro.js';
 
 // ── DOM refs ───────────────────────────────────────────────────
 const $pomPanel = document.getElementById('pomodoro-panel');
@@ -1492,18 +1545,36 @@ let _lastPomHash = '';
  * Computes remaining ms, updates arc, phase labels, countdown, and buttons.
  * @param {object} pom
  */
-function renderPomodoroUI(pom) {
+async function renderPomodoroUI(pom) {
   if (!pom) return;
 
   // ── Compute remaining ms ──
   let remaining;
+  let workMs = pom.workMs || DEFAULT_POMODORO.workMs;
+  let breakMs = pom.breakMs || DEFAULT_POMODORO.breakMs;
+
   if (pom.isPaused) {
     remaining = pom.pausedRemaining || 0;
   } else if (pom.isRunning) {
     remaining = Math.max(0, pom.endTime - Date.now());
   } else {
-    // Idle / just reset — show full duration
-    remaining = pom.phase === 'work' ? WORK_MS : BREAK_MS;
+    // Idle / just reset — load custom durations from active workspace if available
+    try {
+      const { activeWorkspaceId, workspaces } = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
+      const ws = (workspaces || {})[activeWorkspaceId];
+      if (ws) {
+        const workMinutes = ws.pomodoroWorkMinutes ?? 25;
+        const workSeconds = ws.pomodoroWorkSeconds ?? 0;
+        const breakMinutes = ws.pomodoroBreakMinutes ?? 5;
+        const breakSeconds = ws.pomodoroBreakSeconds ?? 0;
+        workMs = (workMinutes * 60 + workSeconds) * 1000;
+        breakMs = (breakMinutes * 60 + breakSeconds) * 1000;
+      }
+    } catch (e) {
+      // Fall back to defaults if workspace load fails
+      console.warn('[Pomodoro] Failed to load workspace durations:', e);
+    }
+    remaining = pom.phase === 'work' ? workMs : breakMs;
   }
 
   // Skip render if nothing changed (avoids SVG janking every second)
@@ -1556,7 +1627,8 @@ function renderPomodoroUI(pom) {
 
   // ── SVG arc ──
   // stroke-dashoffset 0 = full circle (just started), DASH = no arc (expired)
-  const progress = arcProgress(remaining, pom.phase);
+  // Uses workMs/breakMs calculated above (includes workspace-specific durations when idle)
+  const progress = arcProgress(remaining, pom.phase, workMs, breakMs);
   $pomProgress.style.strokeDashoffset = String(DASH * (1 - progress));
   $pomProgress.className = 'pom-arc ' + (
     isPaused ? 'pom-arc--paused' :
@@ -1605,7 +1677,7 @@ function renderPomodoroUI(pom) {
 async function pollPomodoro() {
   try {
     const { pomodoro } = await chrome.storage.local.get('pomodoro');
-    renderPomodoroUI(pomodoro);
+    await renderPomodoroUI(pomodoro);
   } catch { /* SW may be waking — silently skip */ }
 }
 
@@ -1620,11 +1692,11 @@ pollPomodoro();
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.activeWorkspaceId || changes.pomodoro) {
-    chrome.storage.local.get(['activeWorkspaceId', 'pomodoro']).then(({ activeWorkspaceId, pomodoro }) => {
+    chrome.storage.local.get(['activeWorkspaceId', 'pomodoro']).then(async ({ activeWorkspaceId, pomodoro }) => {
       if (activeWorkspaceId) {
         $pomPanel.classList.remove('hidden');
         _lastPomHash = '';           // force re-render on phase change
-        renderPomodoroUI(pomodoro);
+        await renderPomodoroUI(pomodoro);
       } else {
         $pomPanel.classList.add('hidden');
       }
@@ -1637,7 +1709,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const { activeWorkspaceId, pomodoro } = await chrome.storage.local.get(['activeWorkspaceId', 'pomodoro']);
   if (activeWorkspaceId) {
     $pomPanel.classList.remove('hidden');
-    renderPomodoroUI(pomodoro);
+    await renderPomodoroUI(pomodoro);
   }
 })();
 

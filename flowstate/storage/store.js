@@ -78,7 +78,11 @@ export function createWorkspace(name) {
     blockedGroupDomains: {},
     allowedGroupNames: [],
     savedTabs: [],
-    todos: []
+    todos: [],
+    pomodoroWorkMinutes: 25,
+    pomodoroWorkSeconds: 0,
+    pomodoroBreakMinutes: 5,
+    pomodoroBreakSeconds: 0
   };
 }
 

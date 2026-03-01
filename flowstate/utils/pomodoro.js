@@ -24,6 +24,8 @@ export const DEFAULT_POMODORO = {
   pausedRemaining: 0,       // ms remaining when paused (used for resume)
   selectedMode: 'easy',  // 'easy' | 'strict' — mirrors workspace focusMode
   sessionCount: 0,       // # completed work sessions this activation
+  workMs: 25 * 60 * 1000,  // work phase duration in ms (default 25 min)
+  breakMs: 5 * 60 * 1000,  // break phase duration in ms (default 5 min)
 };
 
 // ── Pure helpers ─────────────────────────────────────────────────
@@ -45,10 +47,12 @@ export function formatPomodoroTime(ms) {
  * Compute the SVG arc progress (0–1) for the current phase.
  * @param {number} remaining  ms remaining
  * @param {'work'|'break'} phase
+ * @param {number} workMs  work phase duration in ms
+ * @param {number} breakMs  break phase duration in ms
  * @returns {number} 0 = empty arc (expired), 1 = full arc (just started)
  */
-export function arcProgress(remaining, phase) {
-  const total = phase === 'work' ? WORK_MS : BREAK_MS;
+export function arcProgress(remaining, phase, workMs, breakMs) {
+  const total = phase === 'work' ? workMs : breakMs;
   if (!total) return 0;
   return Math.max(0, Math.min(1, remaining / total));
 }

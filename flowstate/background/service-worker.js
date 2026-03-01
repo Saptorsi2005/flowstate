@@ -15,7 +15,7 @@
 
 import { initSyncListener } from "../utils/sync.js";
 import {
-  WORK_MS, BREAK_MS, WARN_MS,
+  WARN_MS,
   ALARM_WORK_END, ALARM_BREAK_END, ALARM_BREAK_WARN,
   DEFAULT_POMODORO
 } from "../utils/pomodoro.js";
@@ -1363,8 +1363,14 @@ async function activateWorkspace(id) {
       aiTempBlocks: {} // Clear any previous temp blocks
     });
 
-    // ── Auto-start Pomodoro in WORK phase ──
-    await startWorkPhase(ws.focusMode || 'easy');
+    // ── Auto-start Pomodoro in WORK phase with custom durations ──
+    const workMinutes = ws.pomodoroWorkMinutes ?? 25;
+    const workSeconds = ws.pomodoroWorkSeconds ?? 0;
+    const breakMinutes = ws.pomodoroBreakMinutes ?? 5;
+    const breakSeconds = ws.pomodoroBreakSeconds ?? 0;
+    const workMs = (workMinutes * 60 + workSeconds) * 1000;
+    const breakMs = (breakMinutes * 60 + breakSeconds) * 1000;
+    await startWorkPhase(ws.focusMode || 'easy', 0, workMs, breakMs);
 
     // -- Init tracking variable --
     try {
@@ -1503,12 +1509,14 @@ initSyncListener();
  * @param {string} mode  'easy' | 'strict'
  * @param {number} [sessionCount]  carry-over session count (default: existing + 0)
  */
-async function startWorkPhase(mode, sessionCount) {
+async function startWorkPhase(mode, sessionCount, workMs, breakMs) {
   await clearPomodoroAlarms();
 
   const existing = await getPomodoroState();
   const count = sessionCount ?? existing.sessionCount ?? 0;
-  const endTime = Date.now() + WORK_MS;
+  const finalWorkMs = workMs || existing.workMs || DEFAULT_POMODORO.workMs;
+  const finalBreakMs = breakMs || existing.breakMs || DEFAULT_POMODORO.breakMs;
+  const endTime = Date.now() + finalWorkMs;
 
   await chrome.storage.local.set({
     pomodoro: {
@@ -1520,11 +1528,13 @@ async function startWorkPhase(mode, sessionCount) {
       pausedRemaining: 0,
       selectedMode: mode,
       sessionCount: count,
+      workMs: finalWorkMs,
+      breakMs: finalBreakMs,
     }
   });
 
-  chrome.alarms.create(ALARM_WORK_END, { delayInMinutes: WORK_MS / 60000 });
-  console.log('[FlowState Pomodoro] WORK phase started. Mode:', mode, 'Session:', count, 'Ends:', new Date(endTime).toISOString());
+  chrome.alarms.create(ALARM_WORK_END, { delayInMinutes: finalWorkMs / 60000 });
+  console.log('[FlowState Pomodoro] WORK phase started. Mode:', mode, 'Session:', count, 'Duration:', finalWorkMs / 1000, 's. Ends:', new Date(endTime).toISOString());
 }
 
 /**
@@ -1535,10 +1545,13 @@ async function startWorkPhase(mode, sessionCount) {
  * @param {string} mode  carry-over mode from the work phase
  * @param {number} sessionCount  number of completed work sessions
  */
-async function startBreakPhase(mode, sessionCount) {
+async function startBreakPhase(mode, sessionCount, workMs, breakMs) {
   await clearPomodoroAlarms();
 
-  const endTime = Date.now() + BREAK_MS;
+  const existing = await getPomodoroState();
+  const finalWorkMs = workMs || existing.workMs || DEFAULT_POMODORO.workMs;
+  const finalBreakMs = breakMs || existing.breakMs || DEFAULT_POMODORO.breakMs;
+  const endTime = Date.now() + finalBreakMs;
   const warnTime = endTime - WARN_MS;
 
   await chrome.storage.local.set({
@@ -1551,17 +1564,19 @@ async function startBreakPhase(mode, sessionCount) {
       pausedRemaining: 0,
       selectedMode: mode,
       sessionCount,
+      workMs: finalWorkMs,
+      breakMs: finalBreakMs,
     }
   });
 
-  chrome.alarms.create(ALARM_BREAK_END, { delayInMinutes: BREAK_MS / 60000 });
+  chrome.alarms.create(ALARM_BREAK_END, { delayInMinutes: finalBreakMs / 60000 });
 
   // Only schedule warning if there's enough time left
   if (warnTime > Date.now()) {
     chrome.alarms.create(ALARM_BREAK_WARN, { delayInMinutes: (warnTime - Date.now()) / 60000 });
   }
 
-  console.log('[FlowState Pomodoro] BREAK phase started. Session:', sessionCount, 'Ends:', new Date(endTime).toISOString());
+  console.log('[FlowState Pomodoro] BREAK phase started. Session:', sessionCount, 'Duration:', finalBreakMs / 1000, 's. Ends:', new Date(endTime).toISOString());
 
   // Release any tabs currently sitting on the blocked / soft-redirect pages.
   // This navigates them back to the original URL immediately so the user
@@ -1613,7 +1628,9 @@ async function resumePomodoro() {
   const pom = await getPomodoroState();
   if (!pom.isPaused) return { success: false, reason: 'Not paused' };
 
-  const remaining = pom.pausedRemaining || (pom.phase === 'work' ? WORK_MS : BREAK_MS);
+  const workMs = pom.workMs || DEFAULT_POMODORO.workMs;
+  const breakMs = pom.breakMs || DEFAULT_POMODORO.breakMs;
+  const remaining = pom.pausedRemaining || (pom.phase === 'work' ? workMs : breakMs);
   const endTime = Date.now() + remaining;
   const alarmName = pom.phase === 'work' ? ALARM_WORK_END : ALARM_BREAK_END;
 
@@ -1661,16 +1678,18 @@ async function resetPomodoro() {
  */
 async function handlePhaseTransition(event) {
   const pom = await getPomodoroState();
+  const workMs = pom.workMs || DEFAULT_POMODORO.workMs;
+  const breakMs = pom.breakMs || DEFAULT_POMODORO.breakMs;
 
   if (event === 'work-end') {
     console.log('[FlowState Pomodoro] Work phase ended → starting break.');
-    await startBreakPhase(pom.selectedMode || 'easy', (pom.sessionCount || 0) + 1);
+    await startBreakPhase(pom.selectedMode || 'easy', (pom.sessionCount || 0) + 1, workMs, breakMs);
     // Blocking is now OFF — no tab evaluation needed.
 
   } else if (event === 'break-end') {
     console.log('[FlowState Pomodoro] Break phase ended → resuming work.');
     // 1. Write new WORK state to storage (phase becomes 'work').
-    await startWorkPhase(pom.selectedMode || 'easy', pom.sessionCount || 0);
+    await startWorkPhase(pom.selectedMode || 'easy', pom.sessionCount || 0, workMs, breakMs);
     // 2. Immediately evaluate all active tabs — do not wait for next navigation.
     await reactivateBlocking();
   }
@@ -1902,7 +1921,22 @@ async function clearPomodoroAlarms() {
 // ── Pomodoro message handlers ──────────────────────────────────
 async function handlePomodoroStart(mode) {
   try {
-    await startWorkPhase(mode || 'easy');
+    // Get active workspace to retrieve custom Pomodoro durations
+    const { activeWorkspaceId, workspaces } = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
+    const ws = (workspaces || {})[activeWorkspaceId];
+    
+    // Get minutes and seconds from workspace (default to 25:00 and 5:00)
+    const workMinutes = ws?.pomodoroWorkMinutes ?? 25;
+    const workSeconds = ws?.pomodoroWorkSeconds ?? 0;
+    const breakMinutes = ws?.pomodoroBreakMinutes ?? 5;
+    const breakSeconds = ws?.pomodoroBreakSeconds ?? 0;
+    
+    // Convert to milliseconds
+    const workMs = (workMinutes * 60 + workSeconds) * 1000;
+    const breakMs = (breakMinutes * 60 + breakSeconds) * 1000;
+    
+    console.log('[FlowState Pomodoro] Starting with custom durations: Work', workMinutes, 'min', workSeconds, 'sec, Break', breakMinutes, 'min', breakSeconds, 'sec');
+    await startWorkPhase(mode || 'easy', 0, workMs, breakMs);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
