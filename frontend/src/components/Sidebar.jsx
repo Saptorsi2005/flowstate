@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { useAuth0 } from "@auth0/auth0-react";
 
 const navItems = [
     {
@@ -27,26 +28,30 @@ const navItems = [
 
 export default function Sidebar() {
     const location = useLocation();
+    const { user, logout } = useAuth0();
+
+    const getUserInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.split(' ');
+        if (parts.length >= 2) {
+            return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+        }
+        return name[0].toUpperCase();
+    };
 
     return (
         <aside style={styles.sidebar}>
             {/* Brand */}
             <div style={styles.brand}>
                 <div style={styles.brandIcon}>
-                    <img
-                        src="/flowstate-logo.png"
-                        alt="FlowState Logo"
-                        style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 8,
-                            objectFit: "cover",
-                        }}
-                    />
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                    </svg>
                 </div>
                 <div>
                     <h1 style={styles.brandTitle}>FlowState</h1>
-                    <span style={styles.brandSub}>AI Tab Manager</span>
+                    <span style={styles.brandSub}>Focus Manager</span>
                 </div>
             </div>
 
@@ -94,18 +99,59 @@ export default function Sidebar() {
 
             {/* User Card */}
             <div style={styles.userCard}>
-                <img
-                    src="https://i.pravatar.cc/150?img=3"
-                    alt="User"
-                    style={styles.userAvatar}
-                />
-                <div>
-                    <p style={styles.userName}>Pritam B.</p>
+                <div
+                    style={{
+                        ...styles.userAvatar,
+                        background: "linear-gradient(135deg, #22d3ee, #6366f1)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "13px",
+                        fontWeight: 700,
+                        color: "#fff",
+                    }}
+                >
+                    {getUserInitials(user?.name)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={styles.userName}>
+                        {user?.name?.split(' ')[0] || 'User'}
+                    </p>
                     <p style={styles.userStatus}>
                         <span style={styles.onlineDot} />
                         Online
                     </p>
                 </div>
+                <button
+                    onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+                    style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#71717a",
+                        cursor: "pointer",
+                        padding: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 6,
+                        transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                        e.currentTarget.style.color = "#f87171";
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.background = "transparent";
+                        e.currentTarget.style.color = "#71717a";
+                    }}
+                    title="Logout"
+                >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                </button>
             </div>
         </aside>
     );
