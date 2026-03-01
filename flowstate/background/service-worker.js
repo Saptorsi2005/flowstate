@@ -158,15 +158,6 @@ function isYouTubeSafePath(url) {
 // Per-tab doomscroll escalation levels (in-memory, resets on tab close)
 const _doomScrollLevels = new Map(); // tabId → { level, lastTrigger }
 
-// Global variable tracking the last allowed URL across the session
-let lastAllowedUrl = null;
-
-function updateLastAllowed(url) {
-  if (url && !url.startsWith('chrome-extension://') && !url.startsWith('chrome://') && !url.startsWith('about:') && !url.startsWith('edge://')) {
-    lastAllowedUrl = url;
-  }
-}
-
 // ── Productivity Safe Domains — Permanent Allowlist ───────────────────
 // Sites that must NEVER be blocked regardless of workspace rules,
 // manual blocked list, AI classifier, or focus mode.
@@ -1006,17 +997,12 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         const cached = _aiCache.get(cacheKey);
         if (shouldAiBlock(cached.topLabel, cached.topScore, ws.focusMode)) {
           handleAiBlocking(activeInfo.tabId, url, domain, ws.focusMode, data);
-        } else {
-          updateLastAllowed(url); // cached result = allowed
         }
         return;
       }
 
       // Run AI classification asynchronously
       classifyAndMaybeBlock(activeInfo.tabId, url, domain, ws, data.hfApiKey, data);
-    } else {
-      // No AI — URL passed all checks, it's safe
-      updateLastAllowed(url);
     }
   } catch (err) {
     console.error('[FlowState] Error in onActivated:', err);
@@ -1170,17 +1156,7 @@ async function handleMessage(msg, sender) {
     case 'doomscroll-trigger': return handleDoomScrollTrigger(msg, sender);
     case 'doomscroll-classify': return handleDoomScrollClassify(msg.title, msg.url, msg.urlType);
     // ── Navigate to Last Safe URL ──
-    case 'handle-stay-focused': {
-      const targetTabId = msg.tabId || sender?.tab?.id;
-      const safeUrl = lastAllowedUrl || 'https://www.google.com';
-      if (targetTabId) {
-        chrome.tabs.update(targetTabId, { url: safeUrl });
-      }
-      return { success: true };
-    }
-    case 'get-last-safe-url': {
-      return { success: true, url: lastAllowedUrl };
-    }
+    case 'handle-stay-focused': return handleStayFocusedAction(msg.tabId || sender?.tab?.id);
     // ── Pomodoro messages ──
     case 'pomodoro-start': return handlePomodoroStart(msg.mode);
     case 'pomodoro-pause': return handlePomodoroPause();
@@ -2091,3 +2067,69 @@ chrome.storage.local.get('pomodoro').then(({ pomodoro: pom }) => {
     }
   }
 });
+
+// ── Stay Focused Backend Handler ─────────────────────────────────────────────
+async function handleStayFocusedAction(targetTabId) {
+  // Helper to dispose of the distracted tab
+  // - If it's in a group, leave it exactly as-is (remains blocked)
+  // - If it's standalone, close it to clean up the workspace
+  const disposeDistractedTab = async () => {
+    if (!targetTabId) return;
+    try {
+      const tab = await chrome.tabs.get(targetTabId);
+      if (!tab.groupId || tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE) {
+        await chrome.tabs.remove(targetTabId);
+      }
+    } catch (e) { /* ignore */ }
+  };
+
+  const doFallback = async () => {
+    // Find latest safe tab, or open new tab.
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    // Filter tabs that are not the target blocked tab and not flowstate extension pages
+    const safeTabs = tabs.filter(t => t.id !== targetTabId && !t.url.includes('chrome-extension://'));
+
+    if (safeTabs.length > 0) {
+      // Sort by recency (if lastAccessed is available)
+      safeTabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+      const targetSafeTab = safeTabs[0];
+
+      // Jump back to the safe tab
+      await chrome.tabs.update(targetSafeTab.id, { active: true });
+      await disposeDistractedTab();
+    } else {
+      await disposeDistractedTab();
+      // If we closed the last tab, Chrome might open a new tab natively, 
+      // but if not, disposing handles redirect or close.
+    }
+  };
+
+  try {
+    const { activeFocusSession } = await chrome.storage.local.get('activeFocusSession');
+    if (activeFocusSession && activeFocusSession.originTabId) {
+      const originId = activeFocusSession.originTabId;
+      if (originId !== targetTabId) {
+        // Different tab -> Check if origin tab still exists and is safe
+        const originTab = await chrome.tabs.get(originId).catch(() => null);
+        if (originTab && !originTab.url.includes('chrome-extension://')) {
+          // Jump back to origin
+          await chrome.tabs.update(originId, { active: true });
+          await chrome.windows.update(originTab.windowId, { focused: true });
+
+          await disposeDistractedTab();
+          return { success: true };
+        }
+      } else {
+        // Same tab -> The origin tab IS the distracted tab (e.g. they typed youtube in the origin tab).
+        // Navigate away as it's the only one
+        await chrome.tabs.update(targetTabId, { url: 'chrome://newtab' });
+        return { success: true };
+      }
+    }
+    await doFallback();
+  } catch (e) {
+    console.warn('[FlowState] handle-stay-focused error', e);
+    await doFallback().catch(() => { });
+  }
+  return { success: true };
+}
