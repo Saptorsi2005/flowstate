@@ -20,7 +20,7 @@ export default function Landing() {
                     justifyContent: "center",
                     alignItems: "center",
                     height: "100vh",
-                    background: "linear-gradient(135deg, #09090b 0%, #18181b 100%)",
+                    background: "var(--gradient-ethereal)",
                 }}
             >
                 <div style={{ textAlign: "center" }}>
@@ -28,81 +28,91 @@ export default function Landing() {
                         style={{
                             width: 40,
                             height: 40,
-                            border: "3px solid rgba(34,211,238,0.3)",
-                            borderTopColor: "#22d3ee",
+                            border: "3px solid #bfdbfe",
+                            borderTopColor: "#3b82f6",
                             borderRadius: "50%",
                             animation: "spin 1s linear infinite",
                             margin: "0 auto 16px",
                         }}
                     />
-                    <p style={{ fontSize: 14, color: "#71717a" }}>Loading...</p>
+                    <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Loading...</p>
                 </div>
             </div>
         );
     }
 
     return (
-        <div
-            className="glass-card anim-fade-in-up"
-            style={{
-                padding: "60px 50px",
-                maxWidth: 480,
-                width: "100%",
-                textAlign: "center",
-            }}
-        >
-            <h1
-                style={{
-                    fontSize: 36,
-                    fontWeight: 800,
-                    color: "#fafafa",
-                    letterSpacing: "-0.04em",
-                    marginBottom: 12,
-                }}
-            >
-                FlowState
-            </h1>
-
-            <p
-                style={{
-                    fontSize: 15,
-                    color: "#71717a",
-                    marginBottom: 40,
-                    lineHeight: 1.6,
-                }}
-            >
-                Structure your deep work. Eliminate distractions.
-                Build consistency.
-            </p>
-
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--gradient-ethereal)" }}>
             <div
+                className="glass-card anim-fade-in-up"
                 style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 16,
+                    padding: "60px 48px",
+                    maxWidth: 540,
+                    width: "100%",
+                    textAlign: "center",
+                    position: "relative",
+                    overflow: "hidden"
                 }}
             >
-                <button
-                    onClick={() => loginWithRedirect()}
-                    className="btn-primary"
-                    style={{
-                        padding: "14px 20px",
-                        fontSize: 15,
-                        justifyContent: "center",
-                    }}
-                >
-                    Login / Sign Up
-                </button>
-            </div>
+                {/* Decorative background shape */}
+                <div style={{
+                    position: "absolute", top: -100, left: -100, width: 300, height: 300,
+                    borderRadius: "50%", background: "var(--accent-light-blue)", filter: "blur(60px)", opacity: 0.5, zIndex: 0
+                }} />
 
-            <div
-                style={{
-                    marginTop: 40,
-                    fontSize: 13,
-                    color: "#52525b",
-                }}
-            >
-                Stay consistent. Track progress. Improve daily.
+                <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div className="pill-container" style={{ marginBottom: 24, padding: "12px 32px" }}>
+                        <h1
+                            style={{
+                                fontSize: 36,
+                                fontWeight: 800,
+                                color: "var(--text-main)",
+                                letterSpacing: "-0.04em",
+                                margin: 0
+                            }}
+                        >
+                            FlowState
+                        </h1>
+                    </div>
+
+                    <p
+                        style={{
+                            fontSize: 16,
+                            color: "var(--text-muted)",
+                            marginBottom: 44,
+                            lineHeight: 1.6,
+                            fontWeight: 500
+                        }}
+                    >
+                        Your AI partner for advanced<br />scientific discovery and deep focus.
+                    </p>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 300 }}>
+                        <button
+                            onClick={() => loginWithRedirect()}
+                            className="btn-primary"
+                            style={{
+                                padding: "16px 24px",
+                                fontSize: 16,
+                                justifyContent: "center",
+                                width: "100%"
+                            }}
+                        >
+                            Login / Sign Up
+                        </button>
+                    </div>
+
+                    <div
+                        style={{
+                            marginTop: 40,
+                            fontSize: 14,
+                            color: "var(--text-muted)",
+                            fontWeight: 500
+                        }}
+                    >
+                        The world's best focus manager
+                    </div>
+                </div>
             </div>
         </div>
     );

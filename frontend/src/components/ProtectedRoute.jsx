@@ -18,8 +18,8 @@ export default function ProtectedRoute({ children }) {
           justifyContent: "center",
           alignItems: "center",
           height: "100vh",
-          background: "linear-gradient(135deg, #09090b 0%, #18181b 100%)",
-          color: "#fafafa",
+          background: "var(--gradient-ethereal)",
+          color: "var(--text-main)",
         }}
       >
         <div style={{ textAlign: "center" }}>
@@ -27,14 +27,14 @@ export default function ProtectedRoute({ children }) {
             style={{
               width: 40,
               height: 40,
-              border: "3px solid rgba(34,211,238,0.3)",
-              borderTopColor: "#22d3ee",
+              border: "3px solid var(--border-default)",
+              borderTopColor: "var(--accent-blue)",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 16px",
             }}
           />
-          <p style={{ fontSize: 14, color: "#71717a" }}>Loading...</p>
+          <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Loading...</p>
         </div>
       </div>
     );

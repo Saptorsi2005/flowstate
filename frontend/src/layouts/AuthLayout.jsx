@@ -9,7 +9,7 @@ export default function AuthLayout() {
                 alignItems: "center",
                 justifyContent: "center",
                 position: "relative",
-                background: "radial-gradient(circle at 20% 20%, #0f172a, #020617)",
+                background: "var(--bg-primary)",
             }}
         >
             {/* Ambient Background */}

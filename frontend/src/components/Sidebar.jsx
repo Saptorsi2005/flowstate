@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
+import { useTheme } from "../contexts/ThemeContext";
 
 const navItems = [
     {
@@ -29,6 +30,7 @@ const navItems = [
 export default function Sidebar() {
     const location = useLocation();
     const { user, logout } = useAuth0();
+    const { theme, toggleTheme } = useTheme();
 
     const getUserInitials = (name) => {
         if (!name) return '?';
@@ -43,11 +45,12 @@ export default function Sidebar() {
         <aside style={styles.sidebar}>
             {/* Brand */}
             <div style={styles.brand}>
-                <div style={styles.brandIcon}>
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10" />
-                        <polyline points="12 6 12 12 16 14" />
-                    </svg>
+                <div style={{ ...styles.brandIcon, padding: 0, overflow: "hidden" }}>
+                    <img
+                        src="/flowstate-icon.png"
+                        alt="FlowState Logo"
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
                 </div>
                 <div>
                     <h1 style={styles.brandTitle}>FlowState</h1>
@@ -70,14 +73,14 @@ export default function Sidebar() {
                             }}
                             onMouseEnter={(e) => {
                                 if (!isActive) {
-                                    e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-                                    e.currentTarget.style.color = "#e4e4e7";
+                                    e.currentTarget.style.background = "var(--bg-secondary)";
+                                    e.currentTarget.style.color = "var(--text-main)";
                                 }
                             }}
                             onMouseLeave={(e) => {
                                 if (!isActive) {
                                     e.currentTarget.style.background = "transparent";
-                                    e.currentTarget.style.color = "#71717a";
+                                    e.currentTarget.style.color = "var(--text-muted)";
                                 }
                             }}
                         >
@@ -97,12 +100,36 @@ export default function Sidebar() {
             {/* Spacer */}
             <div style={{ flex: 1 }} />
 
+            {/* Theme Toggle */}
+            <div style={{ padding: "0 12px", marginBottom: "20px" }}>
+                <button
+                    onClick={toggleTheme}
+                    style={{
+                        ...styles.navItem,
+                        width: "100%",
+                        justifyContent: "space-between",
+                        padding: "10px 14px",
+                        background: "var(--bg-secondary)",
+                        border: "1px solid var(--border-subtle)"
+                    }}
+                >
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span style={styles.navIcon}>
+                            {theme === "dark" ? "☀️" : "🌙"}
+                        </span>
+                        <span style={styles.navText}>
+                            {theme === "dark" ? "Light Mode" : "Dark Mode"}
+                        </span>
+                    </div>
+                </button>
+            </div>
+
             {/* User Card */}
             <div style={styles.userCard}>
                 <div
                     style={{
                         ...styles.userAvatar,
-                        background: "linear-gradient(135deg, #22d3ee, #6366f1)",
+                        background: "var(--accent-blue)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -137,12 +164,12 @@ export default function Sidebar() {
                         transition: "all 0.2s ease",
                     }}
                     onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-                        e.currentTarget.style.color = "#f87171";
+                        e.currentTarget.style.background = "#fee2e2";
+                        e.currentTarget.style.color = "#ef4444";
                     }}
                     onMouseLeave={(e) => {
                         e.currentTarget.style.background = "transparent";
-                        e.currentTarget.style.color = "#71717a";
+                        e.currentTarget.style.color = "var(--text-muted)";
                     }}
                     title="Logout"
                 >
@@ -164,9 +191,9 @@ const styles = {
         left: 0,
         width: "var(--sidebar-width)",
         height: "100vh",
-        background: "rgba(12, 12, 18, 0.85)",
+        background: "var(--sidebar-bg)",
         backdropFilter: "blur(24px)",
-        borderRight: "1px solid rgba(255,255,255,0.06)",
+        borderRight: "1px solid var(--border-subtle)",
         display: "flex",
         flexDirection: "column",
         padding: "28px 16px 20px",
@@ -184,8 +211,8 @@ const styles = {
         width: "40px",
         height: "40px",
         borderRadius: "12px",
-        background: "rgba(34, 211, 238, 0.08)",
-        border: "1px solid rgba(34, 211, 238, 0.15)",
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border-subtle)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -194,14 +221,14 @@ const styles = {
     brandTitle: {
         fontSize: "17px",
         fontWeight: 800,
-        color: "#fafafa",
+        color: "var(--text-main)",
         letterSpacing: "-0.03em",
         lineHeight: 1.2,
         margin: 0,
     },
     brandSub: {
-        fontSize: "11px",
-        color: "#52525b",
+        fontSize: "12px",
+        color: "var(--text-muted)",
         fontWeight: 500,
         letterSpacing: "0.02em",
     },
@@ -211,9 +238,9 @@ const styles = {
         gap: "4px",
     },
     navLabel: {
-        fontSize: "10px",
+        fontSize: "11px",
         fontWeight: 700,
-        color: "#3f3f46",
+        color: "var(--text-muted)",
         letterSpacing: "0.1em",
         padding: "0 12px",
         marginBottom: "8px",
@@ -223,8 +250,8 @@ const styles = {
         alignItems: "center",
         gap: "12px",
         padding: "10px 12px",
-        borderRadius: "10px",
-        color: "#71717a",
+        borderRadius: "12px",
+        color: "var(--text-muted)",
         textDecoration: "none",
         fontSize: "14px",
         fontWeight: 500,
@@ -232,8 +259,8 @@ const styles = {
         position: "relative",
     },
     navItemActive: {
-        background: "rgba(34, 211, 238, 0.08)",
-        color: "#22d3ee",
+        background: "var(--sidebar-nav-active)",
+        color: "var(--sidebar-text-active)",
     },
     navIcon: {
         display: "flex",
@@ -242,11 +269,11 @@ const styles = {
         width: "32px",
         height: "32px",
         borderRadius: "8px",
-        background: "rgba(255,255,255,0.03)",
+        background: "transparent",
         flexShrink: 0,
     },
     navIconActive: {
-        background: "rgba(34, 211, 238, 0.12)",
+        background: "var(--sidebar-icon-active)",
     },
     navText: {
         overflow: "hidden",
@@ -259,16 +286,16 @@ const styles = {
         width: "3px",
         height: "20px",
         borderRadius: "999px",
-        background: "linear-gradient(180deg, #22d3ee, #6366f1)",
+        background: "var(--accent-cyan)",
     },
     userCard: {
         display: "flex",
         alignItems: "center",
         gap: "12px",
         padding: "14px 12px",
-        background: "rgba(255,255,255,0.03)",
-        borderRadius: "12px",
-        border: "1px solid rgba(255,255,255,0.05)",
+        background: "var(--bg-secondary)",
+        borderRadius: "16px",
+        border: "1px solid var(--border-subtle)",
     },
     userAvatar: {
         width: "36px",
@@ -278,15 +305,15 @@ const styles = {
         flexShrink: 0,
     },
     userName: {
-        fontSize: "13px",
+        fontSize: "14px",
         fontWeight: 600,
-        color: "#e4e4e7",
+        color: "var(--text-main)",
         margin: 0,
         lineHeight: 1.3,
     },
     userStatus: {
-        fontSize: "11px",
-        color: "#52525b",
+        fontSize: "12px",
+        color: "var(--text-muted)",
         margin: 0,
         display: "flex",
         alignItems: "center",
@@ -296,8 +323,8 @@ const styles = {
         width: "6px",
         height: "6px",
         borderRadius: "50%",
-        background: "#34d399",
-        boxShadow: "0 0 6px rgba(52, 211, 153, 0.5)",
+        background: "var(--accent-emerald)",
+        boxShadow: "0 0 6px rgba(16, 185, 129, 0.4)",
         display: "inline-block",
     },
 };
