@@ -127,25 +127,17 @@ $btnUnlock.addEventListener('click', async function () {
   }
 });
 
-// ── "Take me somewhere safe" button ────────────────────────────
-// Navigates to the last non-blocked URL this tab visited.
-// Fallback: history.back() or new tab.
-document.getElementById('btn-go-safe').addEventListener('click', async function () {
-  if (tabId) {
-    try {
-      var res = await chrome.runtime.sendMessage({ type: 'get-last-safe-url', tabId: tabId });
-      if (res && res.url) {
-        window.location.href = res.url;
-        return;
-      }
-    } catch (e) {
-      console.warn('[FlowState] Could not get safe URL:', e);
-    }
-  }
-
-  if (history.length > 1) {
-    history.back();
-  } else {
-    window.location.href = 'chrome://newtab';
+// ── "Stay Focused" button ──────────────────────────────────────────
+// Asks the background script to navigate this tab (using chrome.tabs.update)
+// to the last non-blocked URL tracked across the session.
+document.getElementById('btn-stay').addEventListener('click', async function () {
+  if ($btnUnlock) $btnUnlock.disabled = true;
+  document.getElementById('btn-stay').textContent = 'Loading...';
+  try {
+    await chrome.runtime.sendMessage({ type: 'handle-stay-focused', tabId: tabId || null });
+  } catch (e) {
+    console.warn('[FlowState] Message failed, using failsafe:', e);
+    // Failsafe fallback if background script isn't responding
+    window.location.replace('https://www.google.com');
   }
 });

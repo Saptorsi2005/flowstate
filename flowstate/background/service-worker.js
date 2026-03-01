@@ -158,9 +158,14 @@ function isYouTubeSafePath(url) {
 // Per-tab doomscroll escalation levels (in-memory, resets on tab close)
 const _doomScrollLevels = new Map(); // tabId → { level, lastTrigger }
 
-// Last safe (non-blocked) URL per tab — used by the "Take me somewhere safe" button.
-// Updated at every point where a URL is allowed through, NEVER on blocked paths.
-const _lastSafeUrl = new Map(); // tabId → url
+// Global variable tracking the last allowed URL across the session
+let lastAllowedUrl = null;
+
+function updateLastAllowed(url) {
+  if (url && !url.startsWith('chrome-extension://') && !url.startsWith('chrome://') && !url.startsWith('about:') && !url.startsWith('edge://')) {
+    lastAllowedUrl = url;
+  }
+}
 
 // ── Productivity Safe Domains — Permanent Allowlist ───────────────────
 // Sites that must NEVER be blocked regardless of workspace rules,
@@ -765,7 +770,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Cannot be blocked by any workspace rule, manual list, or AI classifier.
   if (isProductivityDomain(url)) {
     console.log('[FlowState] Productivity site — permanently allowed:', domain);
-    _lastSafeUrl.set(tabId, url);
+    updateLastAllowed(url);
     return;
   }
 
@@ -776,7 +781,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Allowed domains take priority over blocked
   if (isDomainInList(domain, ws.allowedDomains)) {
     console.log('[FlowState] Domain explicitly allowed:', domain);
-    _lastSafeUrl.set(tabId, url);
+    updateLastAllowed(url);
     return;
   }
 
@@ -816,7 +821,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // (homepage, watch, search, playlist, channel, @handle, feed).
   if (isYouTubeSafePath(url)) {
     console.log('[FlowState] YouTube safe route — explicitly allowed:', url);
-    _lastSafeUrl.set(tabId, url);
+    updateLastAllowed(url);
     return;
   }
 
@@ -846,7 +851,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (shouldAiBlock(cached.topLabel, cached.topScore, ws.focusMode)) {
         handleAiBlocking(tabId, url, domain, ws.focusMode, data);
       } else {
-        _lastSafeUrl.set(tabId, url); // cached result = allowed
+        updateLastAllowed(url); // cached result = allowed
       }
       return;
     }
@@ -855,7 +860,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     classifyAndMaybeBlock(tabId, url, domain, ws, data.hfApiKey, data);
   } else {
     // No AI — URL passed all checks, it's safe
-    _lastSafeUrl.set(tabId, url);
+    updateLastAllowed(url);
   }
 });
 
@@ -926,10 +931,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
     console.log('[FlowState onActivated] Tab activated:', domain, 'Blocked list:', ws.blockedDomains);
 
-    // ── ABSOLUTE PRIORITY: Productivity safe list ──
     if (isProductivityDomain(url)) {
       console.log('[FlowState] Productivity site (activated tab) — permanently allowed:', domain);
-      _lastSafeUrl.set(activeInfo.tabId, url);
+      updateLastAllowed(url);
       return;
     }
 
@@ -937,10 +941,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     const unlocked = data.tempUnlockedDomains || [];
     if (unlocked.some(u => u.tabId === activeInfo.tabId && domain.includes(u.domain))) return;
 
-    // Allowed domains take priority over blocked
     if (isDomainInList(domain, ws.allowedDomains)) {
       console.log('[FlowState] Domain allowed:', domain);
-      _lastSafeUrl.set(activeInfo.tabId, url);
+      updateLastAllowed(url);
       return;
     }
 
@@ -972,10 +975,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       }
     }
 
-    // ── 1.5a. YouTube safe-path guard ──
     if (isYouTubeSafePath(url)) {
       console.log('[FlowState] YouTube safe route (activated tab) — explicitly allowed:', url);
-      _lastSafeUrl.set(activeInfo.tabId, url);
+      updateLastAllowed(url);
       return;
     }
 
@@ -1005,7 +1007,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
         if (shouldAiBlock(cached.topLabel, cached.topScore, ws.focusMode)) {
           handleAiBlocking(activeInfo.tabId, url, domain, ws.focusMode, data);
         } else {
-          _lastSafeUrl.set(activeInfo.tabId, url); // cached result = allowed
+          updateLastAllowed(url); // cached result = allowed
         }
         return;
       }
@@ -1014,7 +1016,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
       classifyAndMaybeBlock(activeInfo.tabId, url, domain, ws, data.hfApiKey, data);
     } else {
       // No AI — URL passed all checks, it's safe
-      _lastSafeUrl.set(activeInfo.tabId, url);
+      updateLastAllowed(url);
     }
   } catch (err) {
     console.error('[FlowState] Error in onActivated:', err);
@@ -1042,7 +1044,7 @@ async function classifyAndMaybeBlock(tabId, url, domain, ws, apiKey, data) {
       handleAiBlocking(tabId, url, domain, ws.focusMode, data);
     } else {
       console.log('[FlowState AI] NOT blocking:', domain, '(score too low or wrong category)');
-      _lastSafeUrl.set(tabId, url);
+      updateLastAllowed(url);
     }
   } catch (err) {
     console.warn('[FlowState AI] Classification failed:', err.message);
@@ -1146,7 +1148,6 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   const countdowns = data.unlockCountdowns || {};
   delete countdowns[String(tabId)];
   _aiCache.delete(`${tabId}:*`); // best-effort cleanup
-  _lastSafeUrl.delete(tabId);    // clean up safe URL tracking
   _doomScrollLevels.delete(tabId);
   await chrome.storage.local.set({
     tempUnlockedDomains: filtered,
@@ -1170,9 +1171,17 @@ async function handleMessage(msg, sender) {
     case 'ai-score-intent': return handleAiScoreIntent(msg.reason);
     case 'doomscroll-trigger': return handleDoomScrollTrigger(msg, sender);
     case 'doomscroll-classify': return handleDoomScrollClassify(msg.title, msg.url, msg.urlType);
+    // ── Navigate to Last Safe URL ──
+    case 'handle-stay-focused': {
+      const targetTabId = msg.tabId || sender?.tab?.id;
+      const safeUrl = lastAllowedUrl || 'https://www.google.com';
+      if (targetTabId) {
+        chrome.tabs.update(targetTabId, { url: safeUrl });
+      }
+      return { success: true };
+    }
     case 'get-last-safe-url': {
-      const safeUrl = _lastSafeUrl.get(msg.tabId) || null;
-      return { success: true, url: safeUrl };
+      return { success: true, url: lastAllowedUrl };
     }
     // ── Pomodoro messages ──
     case 'pomodoro-start': return handlePomodoroStart(msg.mode);
@@ -1374,6 +1383,16 @@ async function activateWorkspace(id) {
 
     // ── Auto-start Pomodoro in WORK phase ──
     await startWorkPhase(ws.focusMode || 'easy');
+
+    // -- Init tracking variable --
+    try {
+      const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (activeTabs.length > 0 && activeTabs[0].url) {
+        updateLastAllowed(activeTabs[0].url);
+      }
+    } catch (e) {
+      console.warn('[FlowState] Could not capture initial lastAllowedUrl', e);
+    }
 
     // Don't check or block tabs immediately on activation - let tabs.onUpdated handle it naturally
     // This prevents infinite loops and double-blocking

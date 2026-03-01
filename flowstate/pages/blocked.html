@@ -6,27 +6,6 @@
   <title>Site Blocked — FlowState</title>
   <link rel="stylesheet" href="../styles/global.css" />
   <link rel="stylesheet" href="pages.css" />
-  <style>
-    #btn-go-safe {
-      display: block;
-      margin: 18px auto 0;
-      background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: rgba(255, 255, 255, 0.5);
-      font-size: 13px;
-      padding: 8px 22px;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: border-color 0.2s, color 0.2s, background 0.2s;
-      letter-spacing: 0.02em;
-    }
-
-    #btn-go-safe:hover {
-      border-color: rgba(255, 255, 255, 0.35);
-      color: rgba(255, 255, 255, 0.85);
-      background: rgba(255, 255, 255, 0.05);
-    }
-  </style>
 </head>
 
 <body>
@@ -45,7 +24,7 @@
     </div>
 
     <!-- Safe exit button — always visible -->
-    <button id="btn-go-safe">← Take me somewhere safe</button>
+    <button id="btn-stay" class="btn-stay" style="margin-top: 24px;">Stay Focused</button>
   </div>
 
   <script src="blocked.js"></script>

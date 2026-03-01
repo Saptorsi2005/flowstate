@@ -72,95 +72,14 @@ if (focusMode === 'strict') {
 }
 
 document.getElementById('btn-stay').addEventListener('click', async function () {
-  console.log('[FlowState] Stay Focused clicked, prevTabId:', prevTabId);
+  console.log('[FlowState] Stay Focused clicked');
+  document.getElementById('btn-stay').textContent = 'Loading...';
   try {
-    // ── Load current workspace state first (domains may have changed) ──
-    const data = await chrome.storage.local.get(['activeWorkspaceId', 'workspaces']);
-    const ws = data.workspaces?.[data.activeWorkspaceId];
-    const blockedDomains = ws?.blockedDomains || [];
-    const allowedDomains = ws?.allowedDomains || [];
-
-    // Helper: returns true if a URL is currently blocked
-    function isUrlBlocked(checkUrl) {
-      if (!checkUrl) return false;
-      if (checkUrl.startsWith('chrome-extension://') ||
-        checkUrl.startsWith('chrome://') ||
-        checkUrl.startsWith('about:')) return false;
-      try {
-        const d = new URL(checkUrl).hostname.replace(/^www\./, '');
-        // Explicitly allowed → never considered blocked
-        const isAllowed = allowedDomains.some(a => {
-          const ca = a.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
-          return d.includes(ca) || ca.includes(d);
-        });
-        if (isAllowed) return false;
-        // In blocked list → blocked
-        return blockedDomains.some(blocked => {
-          const cleanBlocked = blocked.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0];
-          return d.includes(cleanBlocked) || cleanBlocked.includes(d);
-        });
-      } catch { return false; }
-    }
-
-    // ── 1. Try to return to the exact previous tab ──────────────
-    // Validate against CURRENT domain list — allowed domains may have changed
-    if (prevTabId !== null) {
-      try {
-        const prevTab = await chrome.tabs.get(prevTabId);
-        if (prevTab &&
-          !isUrlBlocked(prevTab.url) &&
-          !prevTab.url.includes('soft-redirect.html') &&
-          !prevTab.url.includes('blocked.html') &&
-          !prevTab.url.includes('ai-escalation.html')) {
-          console.log('[FlowState] Returning to previous tab:', prevTabId, prevTab.url);
-          await chrome.tabs.update(prevTabId, { active: true });
-          return;
-        } else {
-          console.log('[FlowState] Previous tab is now blocked or a redirect page, falling back to search');
-        }
-      } catch (e) {
-        // Tab no longer exists — fall through to search below
-        console.log('[FlowState] Previous tab', prevTabId, 'no longer exists, falling back to search');
-      }
-    }
-
-    // ── 2. Fallback: find most-recently-used non-blocked tab ─────
-    // Sort by lastAccessed DESC — this is the key fix.
-    // tabs.find() returns the leftmost tab by index (wrong).
-    // We want the tab the user was most recently active on.
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const currentTab = await chrome.tabs.getCurrent();
-
-    console.log('[FlowState] Fallback tab search. Current tab:', currentTab?.id, 'Total tabs:', tabs.length);
-
-    // Filter to valid candidates, then sort by most recently accessed
-    const candidates = tabs
-      .filter(t =>
-        t.id !== currentTab?.id &&
-        !t.url.startsWith('chrome-extension://') &&
-        !t.url.includes('soft-redirect.html') &&
-        !t.url.includes('blocked.html') &&
-        !t.url.includes('ai-escalation.html') &&
-        !isUrlBlocked(t.url)
-      )
-      .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
-
-    const targetTab = candidates[0] ?? null;
-
-    if (targetTab) {
-      console.log('[FlowState] Switching to most-recent non-blocked tab:', targetTab.id, targetTab.url);
-      await chrome.tabs.update(targetTab.id, { active: true });
-    } else {
-      console.log('[FlowState] No suitable tab found, opening new tab');
-      await chrome.tabs.create({ url: 'chrome://newtab', active: true });
-    }
+    await chrome.runtime.sendMessage({ type: 'handle-stay-focused', tabId: tabId || null });
   } catch (e) {
-    console.error('[FlowState] Error in Stay Focused:', e);
-    try {
-      await chrome.tabs.create({ url: 'chrome://newtab', active: true });
-    } catch (err) {
-      console.error('[FlowState] Failed to create new tab:', err);
-    }
+    console.warn('[FlowState] Error in Stay Focused:', e);
+    // Failsafe fallback
+    window.location.replace('https://www.google.com');
   }
 });
 
