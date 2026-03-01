@@ -1121,19 +1121,17 @@ function redirectBlocked(tabId, url, focusMode, blockType = 'manual') {
 
   // Determine the previous (focus) tab to return to when user clicks "Stay Focused"
   const prevId = (_previousTabId !== null && _previousTabId !== tabId) ? _previousTabId : null;
+  const prevParam = prevId !== null ? `&prevTabId=${prevId}` : '';
 
   if (blockType === 'ai-temp-block') {
     // Temporary AI block (always strict)
-    page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=ai-temp`;
+    page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&mode=strict${prevParam}&type=ai-temp`;
   } else if (blockType === 'ai-block') {
     // AI-detected block (strict mode)
-    page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=ai`;
+    page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&mode=strict${prevParam}&type=ai`;
   } else {
     // Manual block (use focus mode)
-    const prevParam = prevId !== null ? `&prevTabId=${prevId}` : '';
-    page = focusMode === 'strict'
-      ? `pages/blocked.html?url=${encoded}&tabId=${tabId}&type=manual`
-      : `pages/soft-redirect.html?url=${encoded}&tabId=${tabId}&mode=${focusMode}${prevParam}`;
+    page = `pages/blocked.html?url=${encoded}&tabId=${tabId}&mode=${focusMode}${prevParam}`;
   }
 
   chrome.tabs.update(tabId, { url: chrome.runtime.getURL(page) });
@@ -1358,6 +1356,13 @@ async function activateWorkspace(id) {
 
     _aiCache.clear(); // Clear AI cache on new session
 
+    // -- Grab origin tab for "Stay Focused" redirect --
+    let originTabId = null;
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]) originTabId = tabs[0].id;
+    } catch (e) { console.warn('Could not get origin tab:', e); }
+
     // -- Focus session: initialize tracking for this session --
     const sessionId = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     _focusSession = {
@@ -1368,6 +1373,7 @@ async function activateWorkspace(id) {
       blockedAttempts: 0,
       successfulUnlocks: 0,
       failedUnlocks: 0,
+      originTabId
     };
     // Persist to storage so score survives SW restart (MV3 ephemeral SW fix)
     await chrome.storage.local.set({ activeFocusSession: _focusSession });

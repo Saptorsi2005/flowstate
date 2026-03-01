@@ -15,16 +15,13 @@
     <p class="blocked-url" id="blocked-url"></p>
     <p class="page-msg" id="page-msg">This site is blocked while your workspace is active.</p>
 
-    <div id="countdown-section" class="hidden">
-      <p class="countdown-label">Access approved! Unlocking in…</p>
-      <div class="countdown-ring">
-        <span id="countdown">15</span>
-      </div>
-      <button id="btn-unlock" disabled>Unlock Site</button>
+
+    <!-- Action buttons (visibility controlled by JS based on focus mode) -->
+    <div class="button-group">
+      <button id="btn-stay" class="btn-primary">Stay Focused</button>
+      <button id="btn-continue" class="btn-secondary">Continue Anyway</button>
     </div>
 
-    <!-- Safe exit button — always visible -->
-    <button id="btn-stay" class="btn-stay" style="margin-top: 24px;">Stay Focused</button>
   </div>
 
   <script src="blocked.js"></script>
