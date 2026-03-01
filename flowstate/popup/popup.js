@@ -14,6 +14,9 @@ import {
 import { startDeviceFlow, pollDeviceFlow, getStoredJwt, getStoredUser, logout } from '../utils/auth.js';
 import { formatTime } from '../utils/timer.js';
 
+// ── Dashboard URL ─────────────────────────────────────────────
+const DASHBOARD_URL = 'http://localhost:5173/home';
+
 // ═══════════════════════════════════════════════════════════════
 // SECTION 1: TAB ORGANIZER BY CATEGORY (DO NOT MODIFY)
 // ═══════════════════════════════════════════════════════════════
@@ -210,6 +213,11 @@ btn.addEventListener('click', async () => {
     btn.disabled = false;
     btn.textContent = 'Organize Tabs';
   }, 1200);
+});
+
+// ── See Your Progress ──────────────────────────────────────────
+document.getElementById('btn-see-progress').addEventListener('click', () => {
+  chrome.tabs.create({ url: DASHBOARD_URL });
 });
 
 // ── Helpers ────────────────────────────────────────────────────
