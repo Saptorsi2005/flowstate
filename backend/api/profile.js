@@ -66,6 +66,40 @@ async function calculateStreak(sql, userId) {
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Helper: Generate heatmap data for last 6 months
+   ────────────────────────────────────────────────────────────── */
+
+function calculateLevel(minutes) {
+  if (minutes === 0) return 0;
+  if (minutes <= 30) return 1;
+  if (minutes <= 90) return 2;
+  if (minutes <= 180) return 3;
+  return 4;
+}
+
+async function generateHeatmapData(sql, userId) {
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+  const rows = await sql`
+    SELECT 
+      date,
+      COALESCE(SUM(deep_focus_minutes), 0) as total_minutes
+    FROM focus_stats
+    WHERE user_id = ${userId}
+      AND date >= ${sixMonthsAgo.toISOString().split('T')[0]}
+    GROUP BY date
+    ORDER BY date ASC
+  `;
+
+  return rows.map(row => ({
+    date: new Date(row.date).toISOString().split('T')[0],
+    count: Number(row.total_minutes),
+    level: calculateLevel(Number(row.total_minutes))
+  }));
+}
+
+/* ──────────────────────────────────────────────────────────────
    Handler
    ────────────────────────────────────────────────────────────── */
 
@@ -166,6 +200,10 @@ export default async function handler(req, res) {
 
     const currentStreak = await calculateStreak(sql, userId);
 
+    /* ── Heatmap Data (Last 6 Months) ─────────────── */
+
+    const heatmapData = await generateHeatmapData(sql, userId);
+
     return res.status(200).json({
       user: {
         id: user.id,
@@ -179,6 +217,7 @@ export default async function handler(req, res) {
         todayFocusScore,
         currentStreak,
       },
+      heatmapData,
     });
 
   } catch (err) {
