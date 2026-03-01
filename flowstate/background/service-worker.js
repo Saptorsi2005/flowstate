@@ -1838,21 +1838,64 @@ async function reactivateBlocking() {
       continue;
     }
 
-    // Allowed domains are never blocked.
-    if (isDomainInList(domain, ws.allowedDomains)) continue;
-
-    // ── Check manual blocklist ──
-    if (isDomainInList(domain, ws.blockedDomains)) {
-      console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting blocked tab:', domain);
-      redirectBlocked(tab.id, url, ws.focusMode, 'manual');
+    // ── ABSOLUTE PRIORITY: Productivity safe list ──
+    if (isProductivityDomain(url)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): productivity site — permanently allowed:', domain);
       continue;
     }
 
-    // ── Check AI temp-blocks ──
+    // Allowed domains are never blocked.
+    if (isDomainInList(domain, ws.allowedDomains)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): domain explicitly allowed:', domain);
+      continue;
+    }
+
+    // ── 0. YouTube Shorts — highest priority ──
+    if (isYouTubeShorts(url)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting YouTube Shorts:', url);
+      redirectBlocked(tab.id, url, 'strict', 'manual');
+      continue;
+    }
+
+    // ── 1. Group + domain blocking ──
+    // A) allowedGroupNames set ? DEFAULT-DENY: only allowed groups pass
+    // B) allowedGroupNames empty ? LEGACY: check blockedDomains + blockedGroupNames
+    if (ws.allowedGroupNames?.length) {
+      const tabAllowed = await isTabAllowedByGroup(tab.id, ws);
+      if (!tabAllowed) {
+        console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting (not in allowed group):', domain);
+        redirectBlocked(tab.id, url, ws.focusMode, 'manual');
+        continue;
+      }
+    } else {
+      const effectiveBlocked = [...(ws.blockedDomains || []), ...getGroupBlockedDomains(ws)];
+      const manuallyBlocked = isDomainInList(domain, effectiveBlocked)
+        || await isTabInBlockedGroup(tab.id, ws);
+      if (manuallyBlocked) {
+        console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting (manual block):', domain);
+        redirectBlocked(tab.id, url, ws.focusMode, 'manual');
+        continue;
+      }
+    }
+
+    // ── 1.5a. YouTube safe-path guard ──
+    if (isYouTubeSafePath(url)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): YouTube safe route — allowed:', url);
+      continue;
+    }
+
+    // ── 1.5b. Static social media check ──
+    if (isSocialMediaDomain(url)) {
+      console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting (static social media):', domain);
+      redirectBlocked(tab.id, url, ws.focusMode, 'ai-block');
+      continue;
+    }
+
+    // ── 2. AI temp-blocks ──
     if (data.aiEnabled && data.hfApiKey) {
       const aiTempBlocks = data.aiTempBlocks || {};
       if (aiTempBlocks[domain] && aiTempBlocks[domain].blockedUntil > Date.now()) {
-        console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting AI-blocked tab:', domain);
+        console.log('[FlowState Pomodoro] reactivateBlocking(): redirecting (AI temp block):', domain);
         redirectBlocked(tab.id, url, 'strict', 'ai-temp-block');
         continue;
       }
