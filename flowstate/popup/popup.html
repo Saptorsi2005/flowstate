@@ -12,10 +12,15 @@
 <body>
   <div id="app">
 
-    <!-- Header with live timer -->
     <header>
-      <h1>FlowState</h1>
-      <span id="timer-display">00:00:00</span>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <img src="../icons/icon48.png" alt="FlowState" style="width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;" />
+        <h1>FlowState</h1>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button id="theme-toggle" class="theme-btn" title="Toggle Theme">🌙</button>
+        <span id="timer-display">00:00:00</span>
+      </div>
     </header>
 
     <!-- Active workspace banner -->

@@ -42,33 +42,27 @@ export default function Profile() {
 
   const stats = profileData
     ? [
-        {
-          label: "Workspaces",
-          value: profileData.stats.totalWorkspaces,
-          icon: <GridIcon />,
-        },
-        {
-          label: "Hours Focused",
-          value: `${profileData.stats.totalDeepWorkHours}h`,
-          icon: <ClockIcon />,
-        },
-        {
-          label: "Day Streak",
-          value: profileData.stats.currentStreak,
-          icon: <FireIcon />,
-        },
-      ]
+      {
+        label: "Workspaces",
+        value: profileData.stats.totalWorkspaces,
+        icon: <GridIcon />,
+      },
+      {
+        label: "Hours Focused",
+        value: `${profileData.stats.totalDeepWorkHours}h`,
+        icon: <ClockIcon />,
+      },
+      {
+        label: "Day Streak",
+        value: profileData.stats.currentStreak,
+        icon: <FireIcon />,
+      },
+    ]
     : [];
 
   const explicitTheme = {
-    light: ["#27272a", "#1e3a8a", "#1d4ed8", "#4338ca", "#22d3ee"],
-    dark: [
-      "rgba(255,255,255,0.05)",
-      "rgba(34, 211, 238, 0.2)",
-      "rgba(34, 211, 238, 0.4)",
-      "rgba(34, 211, 238, 0.7)",
-      "#22d3ee",
-    ],
+    light: ["var(--bg-secondary)", "var(--accent-light-blue)", "#93c5fd", "#60a5fa", "var(--accent-blue)"],
+    dark: ["var(--bg-secondary)", "var(--accent-light-blue)", "#93c5fd", "#60a5fa", "var(--accent-blue)"],
   };
 
   if (loading) {
@@ -86,14 +80,14 @@ export default function Profile() {
             style={{
               width: 40,
               height: 40,
-              border: "3px solid rgba(34,211,238,0.3)",
-              borderTopColor: "#22d3ee",
+              border: "3px solid var(--border-default)",
+              borderTopColor: "var(--accent-blue)",
               borderRadius: "50%",
               animation: "spin 1s linear infinite",
               margin: "0 auto 16px",
             }}
           />
-          <p style={{ fontSize: 14, color: "#71717a" }}>Loading profile...</p>
+          <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Loading profile...</p>
         </div>
       </div>
     );
@@ -101,7 +95,7 @@ export default function Profile() {
 
   if (error) {
     return (
-      <div style={{ textAlign: "center", padding: 40, color: "#71717a" }}>
+      <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)" }}>
         <p>Error loading profile: {error}</p>
         <button
           onClick={() => window.location.reload()}
@@ -130,14 +124,14 @@ export default function Profile() {
               style={{
                 fontSize: 28,
                 fontWeight: 800,
-                color: "#fafafa",
+                color: "var(--text-main)",
                 letterSpacing: "-0.03em",
                 margin: 0,
               }}
             >
               Profile & Settings
             </h1>
-            <p style={{ fontSize: 14, color: "#52525b", marginTop: 4 }}>
+            <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 4 }}>
               Manage your account and focus preferences
             </p>
           </div>
@@ -174,8 +168,7 @@ export default function Profile() {
           <div
             style={{
               height: 100,
-              background:
-                "linear-gradient(135deg, rgba(34,211,238,0.15) 0%, rgba(99,102,241,0.12) 50%, rgba(139,92,246,0.1) 100%)",
+              background: "var(--gradient-ethereal)",
               position: "relative",
             }}
           >
@@ -184,7 +177,7 @@ export default function Profile() {
                 position: "absolute",
                 inset: 0,
                 background:
-                  "radial-gradient(ellipse at 30% 100%, rgba(34,211,238,0.08), transparent 60%)",
+                  "radial-gradient(ellipse at 30% 100%, rgba(255,255,255,0.5), transparent 60%)",
               }}
             />
           </div>
@@ -193,6 +186,8 @@ export default function Profile() {
             <div
               style={{
                 marginTop: -40,
+                position: "relative",
+                zIndex: 1,
                 display: "flex",
                 alignItems: "flex-end",
                 justifyContent: "space-between",
@@ -204,15 +199,14 @@ export default function Profile() {
                     width: 90,
                     height: 90,
                     borderRadius: 16,
-                    background:
-                      "linear-gradient(135deg, #22d3ee 0%, #6366f1 100%)",
+                    background: "var(--gradient-blue-card)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     fontSize: 32,
                     fontWeight: 700,
                     color: "#fff",
-                    border: "4px solid rgba(24,24,27,0.95)",
+                    border: "4px solid var(--bg-card)",
                   }}
                 >
                   {profileData?.user?.name?.charAt(0) ||
@@ -224,13 +218,13 @@ export default function Profile() {
                     style={{
                       fontSize: 22,
                       fontWeight: 700,
-                      color: "#fafafa",
+                      color: "var(--text-main)",
                       margin: 0,
                     }}
                   >
                     {profileData?.user?.name || auth0User?.name || "User"}
                   </h2>
-                  <p style={{ fontSize: 14, color: "#71717a", marginTop: 4 }}>
+                  <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 4 }}>
                     {profileData?.user?.email || auth0User?.email}
                   </p>
                 </div>
@@ -261,8 +255,8 @@ export default function Profile() {
                   style={{
                     padding: 20,
                     borderRadius: 12,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.06)",
+                    background: "var(--bg-secondary)",
+                    border: "1px solid var(--border-subtle)",
                   }}
                 >
                   <div
@@ -273,13 +267,13 @@ export default function Profile() {
                       marginBottom: 8,
                     }}
                   >
-                    <div style={{ color: "#22d3ee", opacity: 0.7 }}>
+                    <div style={{ color: "var(--accent-blue)", opacity: 0.7 }}>
                       {stat.icon}
                     </div>
                     <span
                       style={{
                         fontSize: 13,
-                        color: "#71717a",
+                        color: "var(--text-muted)",
                         fontWeight: 500,
                       }}
                     >
@@ -287,7 +281,7 @@ export default function Profile() {
                     </span>
                   </div>
                   <div
-                    style={{ fontSize: 28, fontWeight: 700, color: "#fafafa" }}
+                    style={{ fontSize: 28, fontWeight: 700, color: "var(--text-main)" }}
                   >
                     {stat.value}
                   </div>
@@ -318,13 +312,13 @@ export default function Profile() {
                 style={{
                   fontSize: 16,
                   fontWeight: 600,
-                  color: "#fafafa",
+                  color: "var(--text-main)",
                   margin: 0,
                 }}
               >
                 Focus Score
               </h3>
-              <p style={{ fontSize: 13, color: "#71717a", marginTop: 4 }}>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
                 Your productivity score for today
               </p>
             </div>
@@ -332,7 +326,7 @@ export default function Profile() {
               style={{
                 fontSize: 48,
                 fontWeight: 800,
-                background: "linear-gradient(135deg, #22d3ee 0%, #6366f1 100%)",
+                background: "var(--gradient-blue-card)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
@@ -353,7 +347,7 @@ export default function Profile() {
               style={{
                 height: "100%",
                 width: `${profileData?.stats?.todayFocusScore || 0}%`,
-                background: "linear-gradient(90deg, #22d3ee 0%, #6366f1 100%)",
+                background: "var(--gradient-blue-card)",
                 borderRadius: 8,
                 transition: "width 0.5s ease",
               }}
@@ -383,9 +377,8 @@ export default function Profile() {
             transformData={(data) =>
               data.map((item) => ({
                 ...item,
-                tooltip: `${item.count} minute${
-                  item.count !== 1 ? "s" : ""
-                } focused on ${format(new Date(item.date), "MMM d, yyyy")}`,
+                tooltip: `${item.count} minute${item.count !== 1 ? "s" : ""
+                  } focused on ${format(new Date(item.date), "MMM d, yyyy")}`,
               }))
             }
           />

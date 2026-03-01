@@ -19,11 +19,11 @@ export default function Home() {
                         'Authorization': `Bearer ${token}`,
                     },
                 });
-                
+
                 if (!response.ok) {
                     throw new Error('Failed to fetch dashboard');
                 }
-                
+
                 const data = await response.json();
                 setDashboardData(data);
             } catch (err) {
@@ -33,7 +33,7 @@ export default function Home() {
                 setLoading(false);
             }
         }
-        
+
         fetchDashboard();
     }, [getAccessTokenSilently]);
 
@@ -45,14 +45,14 @@ export default function Home() {
                         style={{
                             width: 40,
                             height: 40,
-                            border: "3px solid rgba(34,211,238,0.3)",
-                            borderTopColor: "#22d3ee",
+                            border: "3px solid var(--border-default)",
+                            borderTopColor: "var(--accent-blue)",
                             borderRadius: "50%",
                             animation: "spin 1s linear infinite",
                             margin: "0 auto 16px",
                         }}
                     />
-                    <p style={{ fontSize: 14, color: "#71717a" }}>Loading dashboard...</p>
+                    <p style={{ fontSize: 14, color: "var(--text-muted)" }}>Loading dashboard...</p>
                 </div>
             </div>
         );
@@ -60,7 +60,7 @@ export default function Home() {
 
     if (error) {
         return (
-            <div style={{ textAlign: 'center', padding: 40, color: '#71717a' }}>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                 <p>Error loading dashboard: {error}</p>
                 <button onClick={() => window.location.reload()} className="btn-primary" style={{ marginTop: 20 }}>
                     Retry
@@ -86,16 +86,16 @@ export default function Home() {
             <header className="anim-fade-in-up" style={{ marginBottom: 40 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
-                        <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fafafa", letterSpacing: "-0.03em", margin: 0 }}>
+                        <h1 style={{ fontSize: 28, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.03em", margin: 0 }}>
                             Dashboard
                         </h1>
-                        <p style={{ fontSize: 14, color: "#52525b", marginTop: 4 }}>
+                        <p style={{ fontSize: 14, color: "var(--text-muted)", marginTop: 4 }}>
                             Welcome back, {user?.name || 'User'}
                         </p>
                     </div>
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                        <span className="badge badge-cyan">
-                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#22d3ee", display: "inline-block" }} />
+                        <span className="badge badge-blue">
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent-blue)", display: "inline-block" }} />
                             Active
                         </span>
                     </div>
@@ -146,7 +146,7 @@ export default function Home() {
                             {weeklyData.map((day, i) => {
                                 const maxValue = Math.max(...weeklyData.map(d => d.value), 1);
                                 const heightPercent = (day.value / maxValue) * 100;
-                                
+
                                 return (
                                     <div
                                         key={i}
@@ -170,7 +170,7 @@ export default function Home() {
                                                 style={{
                                                     width: "100%",
                                                     height: `${heightPercent}%`,
-                                                    background: heightPercent > 60 
+                                                    background: heightPercent > 60
                                                         ? "linear-gradient(to top, #22d3ee, #6366f1)"
                                                         : "linear-gradient(to top, rgba(34,211,238,0.3), rgba(99,102,241,0.3))",
                                                     borderRadius: "8px 8px 0 0",
@@ -180,10 +180,10 @@ export default function Home() {
                                             />
                                         </div>
                                         <div style={{ textAlign: "center" }}>
-                                            <div style={{ fontSize: 11, color: "#71717a", fontWeight: 600 }}>
+                                            <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>
                                                 {day.day}
                                             </div>
-                                            <div style={{ fontSize: 10, color: "#52525b", marginTop: 2 }}>
+                                            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>
                                                 {day.value}
                                             </div>
                                         </div>
@@ -191,7 +191,7 @@ export default function Home() {
                                 );
                             })}
                         </div>
-                        <div style={{ marginTop: 20, fontSize: 12, color: "#71717a", textAlign: "center" }}>
+                        <div style={{ marginTop: 20, fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
                             Average: {stats?.weeklyAverageFocusScore || 0} / 100
                         </div>
                     </div>
@@ -210,7 +210,7 @@ export default function Home() {
                 <div style={{ display: "grid", gap: 16 }}>
                     {workspaces.length === 0 ? (
                         <div className="glass-card-static" style={{ padding: 40, textAlign: 'center' }}>
-                            <p style={{ color: '#71717a', fontSize: 14 }}>
+                            <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>
                                 No workspaces synced yet. Use the Chrome Extension to create workspaces.
                             </p>
                         </div>
@@ -270,10 +270,10 @@ function StatCard({ icon, label, value, accent, delay, custom }) {
         >
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                 <div style={{ color: accentColors[accent], opacity: 0.8 }}>{icon}</div>
-                <span style={{ fontSize: 13, color: "#71717a", fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 13, color: "var(--text-muted)", fontWeight: 600 }}>{label}</span>
             </div>
             {custom || (
-                <div style={{ fontSize: 26, fontWeight: 700, color: "#fafafa" }}>
+                <div style={{ fontSize: 26, fontWeight: 700, color: "var(--text-main)" }}>
                     {value}
                 </div>
             )}
@@ -285,12 +285,12 @@ function MiniStatCard({ label, value, icon }) {
     return (
         <div className="glass-card-static" style={{ padding: 20 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                <div style={{ color: "#22d3ee", opacity: 0.7 }}>{icon}</div>
-                <span style={{ fontSize: 12, color: "#71717a", fontWeight: 500 }}>
+                <div style={{ color: "var(--accent-blue)", opacity: 0.7 }}>{icon}</div>
+                <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
                     {label}
                 </span>
             </div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#fafafa" }}>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text-main)" }}>
                 {value}
             </div>
         </div>
@@ -299,7 +299,7 @@ function MiniStatCard({ label, value, icon }) {
 
 function WorkspaceCard({ workspace }) {
     const [isOpen, setIsOpen] = useState(false);
-    
+
     const todos = workspace.todos || [];
     const completedTodos = todos.filter(t => t.completed).length;
 
@@ -316,7 +316,7 @@ function WorkspaceCard({ workspace }) {
                 }}
             >
                 <div>
-                    <h3 style={{ fontSize: 16, fontWeight: 600, color: "#fafafa", margin: 0 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, color: "var(--text-main)", margin: 0 }}>
                         {workspace.name}
                     </h3>
                     <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
@@ -335,7 +335,7 @@ function WorkspaceCard({ workspace }) {
                     height="20"
                     viewBox="0 0 24 24"
                     fill="none"
-                    stroke="#71717a"
+                    stroke="var(--text-muted)"
                     strokeWidth="2"
                     style={{
                         transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
@@ -347,11 +347,11 @@ function WorkspaceCard({ workspace }) {
             </div>
 
             {isOpen && (
-                <div style={{ padding: "0 24px 20px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ padding: "0 24px 20px", borderTop: "1px solid var(--border-subtle)" }}>
                     {/* Blocked Domains */}
                     {workspace.blocked_domains?.length > 0 && (
                         <div style={{ marginTop: 16 }}>
-                            <div style={{ fontSize: 12, color: "#71717a", fontWeight: 600, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 8 }}>
                                 Blocked Domains
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -377,7 +377,7 @@ function WorkspaceCard({ workspace }) {
                     {/* Allowed Domains */}
                     {workspace.allowed_domains?.length > 0 && (
                         <div style={{ marginTop: 16 }}>
-                            <div style={{ fontSize: 12, color: "#71717a", fontWeight: 600, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 8 }}>
                                 Allowed Domains
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -403,7 +403,7 @@ function WorkspaceCard({ workspace }) {
                     {/* Todos */}
                     {todos.length > 0 && (
                         <div style={{ marginTop: 16 }}>
-                            <div style={{ fontSize: 12, color: "#71717a", fontWeight: 600, marginBottom: 8 }}>
+                            <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, marginBottom: 8 }}>
                                 To-Do List
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -415,7 +415,7 @@ function WorkspaceCard({ workspace }) {
                                             alignItems: "center",
                                             gap: 8,
                                             fontSize: 13,
-                                            color: todo.completed ? "#52525b" : "#d4d4d8",
+                                            color: todo.completed ? "var(--text-muted)" : "var(--text-main)",
                                             textDecoration: todo.completed ? "line-through" : "none",
                                         }}
                                     >
@@ -424,8 +424,8 @@ function WorkspaceCard({ workspace }) {
                                                 width: 16,
                                                 height: 16,
                                                 borderRadius: 4,
-                                                border: todo.completed ? "2px solid #34d399" : "2px solid rgba(255,255,255,0.15)",
-                                                background: todo.completed ? "rgba(52,211,153,0.2)" : "transparent",
+                                                border: todo.completed ? "2px solid var(--accent-emerald)" : "2px solid var(--border-default)",
+                                                background: todo.completed ? "var(--accent-emerald)" : "transparent",
                                                 display: "flex",
                                                 alignItems: "center",
                                                 justifyContent: "center",

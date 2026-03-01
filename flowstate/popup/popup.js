@@ -321,6 +321,7 @@ let selectedWsId = null;
 let timerInterval = null;
 
 // ── DOM Refs (new UI elements) ─────────────────────────────────
+const $themeToggle = document.getElementById('theme-toggle');
 const $timerDisplay = document.getElementById('timer-display');
 const $activeBanner = document.getElementById('active-banner');
 const $activeWsName = document.getElementById('active-ws-name');
@@ -357,6 +358,33 @@ const $btnActivate = document.getElementById('btn-activate');
     startTimerPolling();
   } catch (e) { console.error('FlowState init error:', e); }
   bindNewEvents();
+
+  // Initialize Theme
+  chrome.storage.local.get('theme', (res) => {
+    const isDark = res.theme === 'dark';
+    if (isDark) {
+      document.body.setAttribute('data-theme', 'dark');
+      if ($themeToggle) $themeToggle.textContent = '☀️';
+    } else {
+      document.body.removeAttribute('data-theme');
+      if ($themeToggle) $themeToggle.textContent = '🌙';
+    }
+  });
+
+  if ($themeToggle) {
+    $themeToggle.addEventListener('click', () => {
+      const isDark = document.body.getAttribute('data-theme') === 'dark';
+      if (isDark) {
+        document.body.removeAttribute('data-theme');
+        $themeToggle.textContent = '🌙';
+        chrome.storage.local.set({ theme: 'light' });
+      } else {
+        document.body.setAttribute('data-theme', 'dark');
+        $themeToggle.textContent = '☀️';
+        chrome.storage.local.set({ theme: 'dark' });
+      }
+    });
+  }
 })();
 // ── Workspace List ─────────────────────────────────────────────
 async function renderWorkspaces() {

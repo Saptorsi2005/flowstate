@@ -2,10 +2,12 @@
 
 body {
   width: 400px;
-  max-height: 600px;
+  min-height: 100vh;
   padding: 0;
   overflow-y: auto;
   background: var(--gradient-bg);
+  background-attachment: fixed;
+  background-size: cover;
 }
 
 #app {
@@ -60,14 +62,33 @@ header h1 {
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #fafafa;
+  color: var(--text);
+}
+
+.theme-btn {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background 0.2s;
+  color: var(--text);
+}
+
+.theme-btn:hover {
+  background: rgba(128, 128, 128, 0.15);
+  transform: scale(1.1);
 }
 
 #timer-display {
   font-size: 13px;
   font-family: 'JetBrains Mono', monospace;
   font-weight: 600;
-  color: #fff;
+  color: var(--text);
   background: var(--bg-card);
   padding: 6px 12px;
   border-radius: var(--radius-full);
@@ -76,7 +97,6 @@ header h1 {
   -webkit-backdrop-filter: blur(16px);
 }
 
-/* ── Active Banner ────────────────────────── */
 #active-banner {
   display: flex;
   justify-content: space-between;
